@@ -1,0 +1,12 @@
+{
+  "name": "agente-trading",
+  "version": "1.0.0",
+  "description": "Agente de señales Hull16 — Trading 24/7",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "node-fetch": "2.6.9"
+  }
+}
