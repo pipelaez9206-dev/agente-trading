@@ -371,7 +371,7 @@ async function sendTG(chatId, msg) {
     const r = await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({chat_id:chatId, text:msg, parse_mode:'Markdown'})
+      body: JSON.stringify({chat_id:chatId, text:msg})
     });
     const d = await r.json();
     if(d.ok) {
@@ -960,20 +960,20 @@ async function main() {
 
   // Mensaje de inicio al grupo
   await sendTG(TG_GROUP,
-    `🤖 *Agente Monitor Iniciado*\n`
+    `🤖 Agente Monitor Iniciado\n`
     +`━━━━━━━━━━━━━━━━━━━━\n`
-    +`✅ Corriendo en la nube 24/7\n`
-    +`📊 ${WATCHLIST.length} activos monitoreados\n`
-    +`⏱ Escaneo cada ${INTERVAL} minutos\n`
-    +`📊 Timeframe: velas de 1 HORA\n`
-    +`🎯 Score mínimo: ${MIN_SCORE}%\n`
+    +`Corriendo en la nube 24/7\n`
+    +`Watchlist: ${WATCHLIST.length} activos\n`
+    +`Escaneo cada ${INTERVAL} minutos\n`
+    +`Timeframe: velas de 1 HORA\n`
+    +`Score minimo: ${MIN_SCORE}%\n`
     +`━━━━━━━━━━━━━━━━━━━━\n`
-    +`⏰ *Horarios activos (ET):*\n`
-    +`⚡ Pre-market: 4:00am - 9:30am\n`
-    +`📊 Mercado: 9:30am - 4:00pm\n`
-    +`🌙 Post-market: 4:00pm - 8:00pm\n`
+    +`Horarios activos ET:\n`
+    +`Pre-market: 4:00am - 9:30am\n`
+    +`Mercado: 9:30am - 4:00pm\n`
+    +`Post-market: 4:00pm - 8:00pm\n`
     +`━━━━━━━━━━━━━━━━━━━━\n`
-    +`🤖 @Buyscanertradyng_bot`
+    +`Bot: @Buyscanertradyng_bot`
   );
 
   // SPY inicial
