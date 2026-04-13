@@ -367,15 +367,21 @@ async function checkSPY() {
 // ── TELEGRAM ─────────────────────────────────
 async function sendTG(chatId, msg) {
   try {
+    log(`📤 Enviando TG a ${chatId}...`);
     const r = await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify({chat_id:chatId, text:msg, parse_mode:'Markdown'})
     });
     const d = await r.json();
+    if(d.ok) {
+      log(`✅ TG enviado a ${chatId}`);
+    } else {
+      log(`❌ TG error ${chatId}: ${d.description} (code ${d.error_code})`);
+    }
     return d.ok;
   } catch(e) {
-    log(`TG error: ${e.message}`);
+    log(`❌ TG excepcion ${chatId}: ${e.message}`);
     return false;
   }
 }
