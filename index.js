@@ -15,34 +15,92 @@ const BLOCK_HOURS= 8;              // horas de bloqueo por símbolo
 
 // ── WATCHLIST ───────────────────────────────
 const WATCHLIST = [
-  {sym:'TALO', name:'Talos Energy'},
-  {sym:'AMPL', name:'Amplitude Inc'},
-  {sym:'QUBT', name:'Quantum Computing'},
-  {sym:'NVTS', name:'Navitas Semi'},
-  {sym:'AMPX', name:'Amprius Tech'},
-  {sym:'UUUU', name:'Energy Fuels'},
-  {sym:'ICHR', name:'Ichor Holdings'},
-  {sym:'SOXL', name:'Direxion Semi 3x'},
-  {sym:'AMD',  name:'AMD Inc'},
-  {sym:'PLTR', name:'Palantir'},
-  {sym:'OKLO', name:'Oklo Inc'},
-  {sym:'SOUN', name:'SoundHound AI'},
-  {sym:'IONQ', name:'IonQ Quantum'},
-  {sym:'MARA', name:'Marathon Digital'},
-  {sym:'HOOD', name:'Robinhood'},
-  {sym:'SOFI', name:'SoFi'},
-  {sym:'SMR',  name:'NuScale Power'},
-  {sym:'RIVN', name:'Rivian'},
+  // Tus acciones principales
+  {sym:'TSLA', name:'Tesla Inc',             sector:'tech'},
+  {sym:'ORCL', name:'Oracle Corporation',    sector:'tech'},
+  {sym:'TALO', name:'Talos Energy',          sector:'energy'},
+  {sym:'AMPL', name:'Amplitude Inc',         sector:'tech'},
+  {sym:'QUBT', name:'Quantum Computing',     sector:'tech'},
+  {sym:'NVTS', name:'Navitas Semi',          sector:'semi'},
+  {sym:'AMPX', name:'Amprius Tech',          sector:'energy'},
+  {sym:'UUUU', name:'Energy Fuels',          sector:'energy'},
+  {sym:'ICHR', name:'Ichor Holdings',        sector:'semi'},
+  {sym:'SOXL', name:'Direxion Semi 3x',      sector:'semi'},
+  {sym:'AMD',  name:'AMD Inc',               sector:'semi'},
+  {sym:'PLTR', name:'Palantir',              sector:'tech'},
+  {sym:'OKLO', name:'Oklo Inc',              sector:'energy'},
+  {sym:'SOUN', name:'SoundHound AI',         sector:'tech'},
+  {sym:'IONQ', name:'IonQ Quantum',          sector:'tech'},
+  {sym:'MARA', name:'Marathon Digital',      sector:'tech'},
+  {sym:'HOOD', name:'Robinhood',             sector:'tech'},
+  {sym:'SOFI', name:'SoFi Technologies',     sector:'tech'},
+  {sym:'SMR',  name:'NuScale Power',         sector:'energy'},
+  {sym:'RIVN', name:'Rivian',                sector:'tech'},
 ];
 
+// Scanner dinámico — empresas DISTINTAS a la watchlist fija
+// Tecnología, Semiconductores y Energía · Rango $5-$20
+const SCANNER = [
+  // ── SEMICONDUCTORES ──
+  {sym:'WOLF', name:'Wolfspeed',             sector:'semi'},
+  {sym:'COHU', name:'Cohu Inc',              sector:'semi'},
+  {sym:'FORM', name:'FormFactor',            sector:'semi'},
+  {sym:'AEHR', name:'Aehr Test Systems',     sector:'semi'},
+  {sym:'ACLS', name:'Axcelis Technologies',  sector:'semi'},
+  {sym:'ONTO', name:'Onto Innovation',       sector:'semi'},
+  {sym:'KLIC', name:'Kulicke & Soffa',       sector:'semi'},
+  {sym:'DIOD', name:'Diodes Inc',            sector:'semi'},
+  {sym:'SITM', name:'SiTime Corp',           sector:'semi'},
+  {sym:'POWI', name:'Power Integrations',    sector:'semi'},
+  // ── TECNOLOGÍA ──
+  {sym:'BBAI', name:'BigBear.ai',            sector:'tech'},
+  {sym:'ASAN', name:'Asana Inc',             sector:'tech'},
+  {sym:'DOMO', name:'Domo Inc',              sector:'tech'},
+  {sym:'VER',  name:'Verint Systems',        sector:'tech'},
+  {sym:'PRCT', name:'PROCEPT BioRobotics',   sector:'tech'},
+  {sym:'LPSN', name:'LivePerson',            sector:'tech'},
+  {sym:'CLOV', name:'Clover Health',         sector:'tech'},
+  {sym:'HIMS', name:'Hims & Hers Health',    sector:'tech'},
+  {sym:'BIRD', name:'Allbirds',              sector:'tech'},
+  {sym:'MAPS', name:'WM Technology',         sector:'tech'},
+  {sym:'CWAN', name:'Clearwater Analytics',  sector:'tech'},
+  {sym:'NRDS', name:'NerdWallet',            sector:'tech'},
+  {sym:'SEAT', name:'Vivid Seats',           sector:'tech'},
+  {sym:'TDOC', name:'Teladoc Health',        sector:'tech'},
+  {sym:'VZIO', name:'VIZIO Holding',         sector:'tech'},
+  // ── ENERGÍA ──
+  {sym:'PLUG', name:'Plug Power',            sector:'energy'},
+  {sym:'FCEL', name:'FuelCell Energy',       sector:'energy'},
+  {sym:'BLNK', name:'Blink Charging',        sector:'energy'},
+  {sym:'CHPT', name:'ChargePoint Holdings',  sector:'energy'},
+  {sym:'BE',   name:'Bloom Energy',          sector:'energy'},
+  {sym:'POLA', name:'Polar Power',           sector:'energy'},
+  {sym:'NKLA', name:'Nikola Corporation',    sector:'energy'},
+  {sym:'CLNE', name:'Clean Energy Fuels',    sector:'energy'},
+  {sym:'GEVO', name:'Gevo Inc',              sector:'energy'},
+  {sym:'REX',  name:'REX Energy',            sector:'energy'},
+  // ── IA Y QUANTUM ──
+  {sym:'RGTI', name:'Rigetti Computing',     sector:'tech'},
+  {sym:'ARQQ', name:'Arqit Quantum',         sector:'tech'},
+  {sym:'QBTS', name:'D-Wave Quantum',        sector:'tech'},
+  {sym:'KULR', name:'KULR Technology',       sector:'tech'},
+  {sym:'MVIS', name:'MicroVision',           sector:'tech'},
+];
+
+// IDs de watchlist para excluir del scanner
+const WATCHLIST_SYMS = new Set(WATCHLIST.map(u=>u.sym));
+
 // ── STATE ────────────────────────────────────
-let hullLock  = {};
-let alerted   = {};
-let marketOK  = true;
-let spyScore  = 0;
-let scanCount = 0;
-let sigCount  = 0;
-let startTime = Date.now();
+let hullLock    = {};
+let hullLockR   = {}; // hull lock para el radar
+let alerted     = {};
+let marketOK    = true;
+let spyScore    = 0;
+let scanCount   = 0;
+let sigCount    = 0;
+let startTime   = Date.now();
+let radarScores = {}; // scores del radar Top5
+let top5Sent    = ''; // fecha del último Top5 enviado
 
 // ── MATH ─────────────────────────────────────
 const sma = (d,n) => {
@@ -104,27 +162,31 @@ async function fetchT(url, ms=7000) {
 // ── FETCH BARRAS ─────────────────────────────
 async function fetchBars(sym) {
   const to   = new Date();
-  const from = new Date(to - 20*864e5);
+  const from = new Date(to - 30*864e5); // 30 días para tener suficientes velas 1H
   const fmt  = d => d.toISOString().split('T')[0];
 
-  // Polygon primero (plan pagado)
+  // Polygon — velas de 1 HORA
   try {
-    const url = `https://api.polygon.io/v2/aggs/ticker/${sym}/range/15/minute/${fmt(from)}/${fmt(to)}?adjusted=true&sort=asc&limit=400&apiKey=${POLY}`;
+    const url = `https://api.polygon.io/v2/aggs/ticker/${sym}/range/1/hour/${fmt(from)}/${fmt(to)}?adjusted=true&sort=asc&limit=500&apiKey=${POLY}`;
     const r = await fetchT(url, 6000);
     const d = await r.json();
-    if(d?.results?.length>=20) {
+    if(d?.results?.length>=40) {
+      log(`${sym}: ${d.results.length} velas 1H desde Polygon`);
       return d.results.map(b=>+b.c.toFixed(2));
     }
   } catch(e) {}
 
-  // Yahoo como respaldo
+  // Yahoo como respaldo — velas 1H
   try {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=15m&range=5d`;
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=1h&range=30d`;
     const r = await fetchT(url, 6000);
     const d = await r.json();
     const cl = d?.chart?.result?.[0]?.indicators?.quote?.[0]?.close
       ?.filter(v=>v!=null&&v>0).map(v=>+v.toFixed(2));
-    if(cl?.length>=20) return cl;
+    if(cl?.length>=40) {
+      log(`${sym}: ${cl.length} velas 1H desde Yahoo`);
+      return cl;
+    }
   } catch(e) {}
 
   return null;
@@ -156,36 +218,60 @@ function analyze(sym, d) {
     }
   }
   const hl   = hullLock[sym];
-  hl.bars    = Math.floor((Date.now()-hl.flipTime)/(15*60*1000));
+  hl.bars    = Math.floor((Date.now()-hl.flipTime)/(60*60*1000)); // barras de 1H
+
+  // EMA9 cambio de tendencia — de bajar a subir (independiente de MA20)
+  // Necesitamos 3 valores de EMA9 para detectar el cambio de dirección
+  const ma9prev  = d.length>2 ? ema(d.slice(0,-1), 9) : null;
+  const ma9prev2 = d.length>3 ? ema(d.slice(0,-2), 9) : null;
+
+  // EMA9 cambia de dirección alcista:
+  // Barra 2 atrás: EMA9 bajaba (ma9prev2 > ma9prev)
+  // Barra actual:  EMA9 sube    (ma9 > ma9prev)
+  const ema9TurnUp = !!(ma9&&ma9prev&&ma9prev2
+    && ma9 > ma9prev      // ahora EMA9 está subiendo
+    && ma9prev <= ma9prev2); // antes EMA9 estaba bajando o plana
+
+  // EMA9 ya en tendencia alcista (lleva subiendo)
+  const ema9Trending = !!(ma9&&ma9prev&&ma9>ma9prev);
 
   // Score
   let pts=0, max=0;
   const add = (ok,w) => {max+=w; if(ok) pts+=w;};
-  add(hullUp,                                          4);
-  add(!!(ma9&&ma20&&ma9>ma20),                         3);
-  add(!!(ma20&&ma40&&ma20>ma40),                       2);
-  add(!!(rsiV&&rsiV>=35&&rsiV<=68),                   2);
-  add(price>(h16||price),                             2);
+  add(hullUp,         4); // Hull16 apunta alcista
+  add(ema9TurnUp,     5); // EMA9 cambió a tendencia alcista — señal fuerte
+  add(ema9Trending,   2); // EMA9 subiendo (confirmador)
+  add(!!(ma20&&ma40&&ma20>ma40), 2); // MA20 sobre MA40
+  add(!!(rsiV&&rsiV>=35&&rsiV<=68), 2); // RSI zona sana
+  add(price>(h16||price), 2); // precio sobre Hull16
   const score = max>0 ? Math.round(pts/max*100) : 50;
 
-  // Condiciones BUY — más permisivas en pre/post market
-  const session = getMarketSession();
+  // Condiciones BUY
+  const session    = getMarketSession();
   const isExtended = session==='PREMARKET' || session==='POSTMARKET';
-  const minScore = isExtended ? MIN_SCORE-5 : MIN_SCORE; // 65% en extendido, 70% en abierto
-  const minBars  = isExtended ? 1 : 2; // 1 barra en extendido, 2 en abierto
-  const rsiMin   = isExtended ? 30 : 35;
-  const rsiMax   = isExtended ? 72 : 68;
+  const minScore   = isExtended ? MIN_SCORE-5 : MIN_SCORE;
+  const minBars    = isExtended ? 1 : 2; // 2 horas confirmadas en mercado abierto
+  const rsiMin     = isExtended ? 30 : 35;
+  const rsiMax     = isExtended ? 72 : 68;
+
+  // BUY requiere:
+  // 1. Hull16 flipea a alcista ↑
+  // 2. EMA9 cambió de dirección a alcista ↑ (o ya viene subiendo)
+  // 3. Score mínimo
+  // 4. RSI en zona válida
+  const ema9Ok = ema9TurnUp || ema9Trending;
 
   const isBuy = hullFlip && hullUp
+    && ema9Ok
     && score >= minScore
     && hl.bars >= minBars
-    && !!(ma9&&ma20&&ma9>ma20)
     && (rsiV===null||(rsiV>=rsiMin&&rsiV<=rsiMax));
 
   return {
     sym, price:+price.toFixed(2),
     hullUp, hullFlip, hullBars:hl.bars,
     score, isBuy, rsiV,
+    ema9Turn: ema9TurnUp,
     t1: +(price*1.02).toFixed(2),
     t2: +(price*1.03).toFixed(2),
     sl: +(price*0.985).toFixed(2)
@@ -266,13 +352,131 @@ async function sendSignal(sig) {
     +`✅ Target +3%: *$${sig.t2}*\n`
     +`🛑 Stop -1.5%: *$${sig.sl}*\n`
     +`━━━━━━━━━━━━━━━━━━━━\n`
-    +`🎯 Hull16 ALCISTA ↑ · ${sig.hullBars} barra(s)\n`
+    +`🎯 Hull16 ALCISTA ↑ · ${sig.hullBars} hora(s) confirmadas\n`
+    +(sig.ema9Turn?`📊 EMA9 cambió a ALCISTA ↑ (giro de tendencia)\n`:`📊 EMA9 en tendencia alcista ↑\n`)
     +`⏰ ${hora} ET${sesWarn}`;
 
   // Enviar al grupo
   const ok = await sendTG(TG_GROUP, msg);
   if(ok) log(`✅ Telegram → grupo: ${sig.sym}`);
   return ok;
+}
+
+// ── TOP 5 RADAR ──────────────────────────────
+async function analyzeRadar(sym, d, lock) {
+  if(!d||d.length<40) return null;
+  const price = d[d.length-1];
+
+  // Filtro rango $5-$20
+  if(price < 5 || price > 20) return null;
+
+  const h16   = hma16(d);
+  const h16p  = d.length>17 ? hma16(d.slice(0,-1)) : null;
+  const h16pp = d.length>18 ? hma16(d.slice(0,-2)) : null;
+  const ma9   = ema(d,9);
+  const ma9p  = d.length>2  ? ema(d.slice(0,-1),9) : null;
+  const ma9p2 = d.length>3  ? ema(d.slice(0,-2),9) : null;
+  const ma20  = sma(d,20);
+  const ma40  = sma(d,40);
+  const rsiV  = rsi14(d);
+  if(!h16||!ma20) return null;
+
+  const hullUp   = h16p ? h16>h16p : true;
+  const hullFlip = h16&&h16p&&h16pp ? ((h16>h16p)!==(h16p>h16pp)) : false;
+
+  if(!lock[sym]) lock[sym]={dir:hullUp?'UP':'DOWN',flipTime:Date.now(),bars:0};
+  else if(hullFlip){const nd=hullUp?'UP':'DOWN';if(lock[sym].dir!==nd)lock[sym]={dir:nd,flipTime:Date.now(),bars:0};}
+  lock[sym].bars = Math.floor((Date.now()-lock[sym].flipTime)/(60*60*1000));
+
+  const ema9TurnUp = !!(ma9&&ma9p&&ma9p2&&ma9>ma9p&&ma9p<=ma9p2);
+
+  let pts=0,max=0;
+  const add=(ok,w)=>{max+=w;if(ok)pts+=w;};
+  add(hullUp,4);
+  add(ema9TurnUp,5);
+  add(!!(ma9&&ma9p&&ma9>ma9p),2);
+  add(!!(ma20&&ma40&&ma20>ma40),2);
+  add(!!(rsiV&&rsiV>=35&&rsiV<=68),2);
+  add(price>(h16||price),2);
+  const score = max>0 ? Math.round(pts/max*100) : 50;
+
+  return {
+    sym, price:+price.toFixed(2), score,
+    hullUp, hullFlip, bars:lock[sym].bars,
+    rsiV, ema9Turn:ema9TurnUp,
+    t1:+(price*1.02).toFixed(2),
+    t2:+(price*1.03).toFixed(2),
+    sl:+(price*0.985).toFixed(2),
+  };
+}
+
+async function runRadarTop5() {
+  const today = new Date().toISOString().split('T')[0];
+  if(top5Sent === today) return; // ya se envió hoy
+
+  // Solo enviar entre 9:30am y 10:30am ET
+  const et = getET();
+  const t  = et.getHours()*60 + et.getMinutes();
+  if(t < 570 || t > 630) return;
+
+  log(`⭐ Scanner dinámico — ${SCANNER.length} empresas nuevas...`);
+  const scores = [];
+
+  // Escanear SOLO empresas del scanner (distintas a watchlist)
+  for(let i=0; i<SCANNER.length; i+=4) {
+    const batch = SCANNER.slice(i,i+4).filter(u=>!WATCHLIST_SYMS.has(u.sym));
+    const res = await Promise.all(batch.map(async u => {
+      try {
+        const bars = await fetchBars(u.sym);
+        if(bars?.length>=40) {
+          const sig = await analyzeRadar(u.sym, bars, hullLockR);
+          if(sig) return {...sig, sector:u.sector, name:u.name};
+        }
+      } catch(e){}
+      return null;
+    }));
+    res.forEach(r=>{ if(r) scores.push(r); });
+    await new Promise(r=>setTimeout(r,300));
+  }
+
+  if(!scores.length) { log('Radar: sin datos suficientes'); return; }
+
+  // Ordenar por score y tomar Top 5
+  const top5 = scores
+    .sort((a,b) => b.score - a.score)
+    .slice(0,5);
+
+  const hora = et.toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'});
+  const medals = ['🥇','🥈','🥉','4️⃣','5️⃣'];
+  const sectorIcon = {tech:'💻',semi:'🔬',energy:'⚡'};
+
+  let msg = `🔭 *SCANNER DIARIO — TOP 5 NUEVAS OPORTUNIDADES*\n`
+    +`━━━━━━━━━━━━━━━━━━━━\n`
+    +`📊 Empresas fuera de tu watchlist fija\n`
+    +`💵 Rango: $5-$20 · Velas 1H\n`
+    +`🔬 Tech · Semis · Energía · IA\n`
+    +`🌎 SPY: ${spyScore}% · ${hora} ET\n`
+    +`━━━━━━━━━━━━━━━━━━━━\n`;
+
+  top5.forEach((s,i) => {
+    const ic = sectorIcon[s.sector]||'📊';
+    const estado = s.hullUp&&s.score>=65?'🟢 BUENA':s.hullUp?'🟡 VIGILAR':'⚪ ESPERAR';
+    msg += `${medals[i]} ${ic} *${s.sym}* — ${s.name}\n`
+      +`   ${estado} · Score: ${s.score}%\n`
+      +`   💵 $${s.price} · T1: $${s.t1} · Stop: $${s.sl}\n`
+      +(s.rsiV?`   RSI: ${s.rsiV}\n`:'')
+      +(i<top5.length-1?`─────────────────────\n`:'');
+  });
+
+  msg += `━━━━━━━━━━━━━━━━━━━━\n`
+    +`💡 Estas son oportunidades nuevas del día\n`
+    +`📋 Tu watchlist fija sigue monitoreándose\n`
+    +`🤖 @Buyscanertradyng_bot`;
+
+  await sendTG(TG_GROUP, msg);
+  await sendTG(TG_FELIPE, msg);
+  top5Sent = today;
+  log(`✅ Top5 enviado: ${top5.map(s=>s.sym).join(', ')}`);
 }
 
 async function sendDailySummary() {
@@ -404,6 +608,7 @@ async function main() {
   log('🚀 Agente Trading iniciando en Railway...');
   log(`📊 Watchlist: ${WATCHLIST.length} activos`);
   log(`⏱  Intervalo: ${INTERVAL} minutos`);
+  log(`📊 Timeframe: 1 HORA · Hull16 + EMA9 en velas de 60min`);
   log(`🎯 Score mínimo: ${MIN_SCORE}%`);
   log(`🔒 Bloqueo: ${BLOCK_HOURS} horas por señal`);
 
@@ -414,6 +619,7 @@ async function main() {
     +`✅ Corriendo en la nube 24/7\n`
     +`📊 ${WATCHLIST.length} activos monitoreados\n`
     +`⏱ Escaneo cada ${INTERVAL} minutos\n`
+    +`📊 Timeframe: velas de 1 HORA\n`
     +`🎯 Score mínimo: ${MIN_SCORE}%\n`
     +`━━━━━━━━━━━━━━━━━━━━\n`
     +`⏰ *Horarios activos (ET):*\n`
@@ -433,6 +639,7 @@ async function main() {
   // Loop cada N minutos
   setInterval(async () => {
     await runScan();
+    await runRadarTop5();  // Top5 al inicio del mercado
     scheduleDailySummary();
   }, INTERVAL * 60 * 1000);
 }
