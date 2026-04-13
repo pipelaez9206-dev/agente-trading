@@ -38,8 +38,8 @@ const WATCHLIST = [
   {sym:'RIVN', name:'Rivian',                sector:'tech'},
 ];
 
-// Scanner dinámico — empresas DISTINTAS a la watchlist fija
-// Tecnología, Semiconductores y Energía · Rango $5-$20
+// Scanner dinámico — universo amplio de empresas NO en watchlist
+// Tecnología, Semiconductores, Energía, IA, Biotech · Rango $3-$50
 const SCANNER = [
   // ── SEMICONDUCTORES ──
   {sym:'WOLF', name:'Wolfspeed',             sector:'semi'},
@@ -52,39 +52,72 @@ const SCANNER = [
   {sym:'DIOD', name:'Diodes Inc',            sector:'semi'},
   {sym:'SITM', name:'SiTime Corp',           sector:'semi'},
   {sym:'POWI', name:'Power Integrations',    sector:'semi'},
-  // ── TECNOLOGÍA ──
+  {sym:'MPWR', name:'Monolithic Power',      sector:'semi'},
+  {sym:'ALGM', name:'Allegro MicroSystems',  sector:'semi'},
+  {sym:'AMBA', name:'Ambarella Inc',         sector:'semi'},
+  {sym:'CRUS', name:'Cirrus Logic',          sector:'semi'},
+  {sym:'SMTC', name:'Semtech Corp',          sector:'semi'},
+  // ── TECNOLOGÍA / IA ──
   {sym:'BBAI', name:'BigBear.ai',            sector:'tech'},
   {sym:'ASAN', name:'Asana Inc',             sector:'tech'},
   {sym:'DOMO', name:'Domo Inc',              sector:'tech'},
-  {sym:'VER',  name:'Verint Systems',        sector:'tech'},
-  {sym:'PRCT', name:'PROCEPT BioRobotics',   sector:'tech'},
   {sym:'LPSN', name:'LivePerson',            sector:'tech'},
   {sym:'CLOV', name:'Clover Health',         sector:'tech'},
   {sym:'HIMS', name:'Hims & Hers Health',    sector:'tech'},
-  {sym:'BIRD', name:'Allbirds',              sector:'tech'},
   {sym:'MAPS', name:'WM Technology',         sector:'tech'},
-  {sym:'CWAN', name:'Clearwater Analytics',  sector:'tech'},
-  {sym:'NRDS', name:'NerdWallet',            sector:'tech'},
-  {sym:'SEAT', name:'Vivid Seats',           sector:'tech'},
   {sym:'TDOC', name:'Teladoc Health',        sector:'tech'},
-  {sym:'VZIO', name:'VIZIO Holding',         sector:'tech'},
-  // ── ENERGÍA ──
+  {sym:'AI',   name:'C3.ai Inc',             sector:'tech'},
+  {sym:'UPST', name:'Upstart Holdings',      sector:'tech'},
+  {sym:'AIOT', name:'PowerFleet Inc',        sector:'tech'},
+  {sym:'RCAT', name:'Red Cat Holdings',      sector:'tech'},
+  {sym:'IREN', name:'Iris Energy',           sector:'tech'},
+  {sym:'GFAI', name:'Guardforce AI',         sector:'tech'},
+  {sym:'VNET', name:'21Vianet Group',        sector:'tech'},
+  {sym:'KOSS', name:'Koss Corporation',      sector:'tech'},
+  {sym:'JMIA', name:'Jumia Technologies',    sector:'tech'},
+  {sym:'OPEN', name:'Opendoor Tech',         sector:'tech'},
+  {sym:'COUR', name:'Coursera Inc',          sector:'tech'},
+  {sym:'XMTR', name:'Xometry Inc',           sector:'tech'},
+  // ── ENERGÍA LIMPIA / NUCLEAR ──
   {sym:'PLUG', name:'Plug Power',            sector:'energy'},
   {sym:'FCEL', name:'FuelCell Energy',       sector:'energy'},
   {sym:'BLNK', name:'Blink Charging',        sector:'energy'},
   {sym:'CHPT', name:'ChargePoint Holdings',  sector:'energy'},
   {sym:'BE',   name:'Bloom Energy',          sector:'energy'},
-  {sym:'POLA', name:'Polar Power',           sector:'energy'},
   {sym:'NKLA', name:'Nikola Corporation',    sector:'energy'},
   {sym:'CLNE', name:'Clean Energy Fuels',    sector:'energy'},
   {sym:'GEVO', name:'Gevo Inc',              sector:'energy'},
-  {sym:'REX',  name:'REX Energy',            sector:'energy'},
-  // ── IA Y QUANTUM ──
+  {sym:'PNTM', name:'Pontem Energy',         sector:'energy'},
+  {sym:'MVST', name:'Microvast Holdings',    sector:'energy'},
+  {sym:'SUNW', name:'Sunworks Inc',          sector:'energy'},
+  {sym:'SPWR', name:'SunPower Corp',         sector:'energy'},
+  {sym:'ARRY', name:'Array Technologies',    sector:'energy'},
+  {sym:'FLNC', name:'Fluence Energy',        sector:'energy'},
+  {sym:'SHLS', name:'Shoals Technologies',   sector:'energy'},
+  // ── QUANTUM / COMPUTACIÓN AVANZADA ──
   {sym:'RGTI', name:'Rigetti Computing',     sector:'tech'},
-  {sym:'ARQQ', name:'Arqit Quantum',         sector:'tech'},
   {sym:'QBTS', name:'D-Wave Quantum',        sector:'tech'},
   {sym:'KULR', name:'KULR Technology',       sector:'tech'},
   {sym:'MVIS', name:'MicroVision',           sector:'tech'},
+  {sym:'ARQQ', name:'Arqit Quantum',         sector:'tech'},
+  // ── CRIPTO / BLOCKCHAIN ──
+  {sym:'RIOT', name:'Riot Platforms',        sector:'tech'},
+  {sym:'CIFR', name:'Cipher Mining',         sector:'tech'},
+  {sym:'HUT',  name:'Hut 8 Mining',          sector:'tech'},
+  {sym:'BTBT', name:'Bit Digital',           sector:'tech'},
+  {sym:'CLSK', name:'CleanSpark Inc',        sector:'tech'},
+  // ── FINTECH / PAGOS ──
+  {sym:'DAVE', name:'Dave Inc',              sector:'tech'},
+  {sym:'STEP', name:'StepStone Group',       sector:'tech'},
+  {sym:'CURO', name:'Curo Group',            sector:'tech'},
+  {sym:'RELY', name:'Remitly Global',        sector:'tech'},
+  {sym:'FLYW', name:'Flywire Corp',          sector:'tech'},
+  // ── SALUD / BIOTECH ──
+  {sym:'ACMR', name:'ACM Research',          sector:'tech'},
+  {sym:'EVER', name:'EverCommerce',          sector:'tech'},
+  {sym:'DOCS', name:'Doximity Inc',          sector:'tech'},
+  {sym:'ONEM', name:'1Life Healthcare',      sector:'tech'},
+  {sym:'CERT', name:'Certara Inc',           sector:'tech'},
 ];
 
 // IDs de watchlist para excluir del scanner
@@ -193,6 +226,18 @@ async function fetchBars(sym) {
 }
 
 // ── ANALYZE ──────────────────────────────────
+// Helper para retorno base
+function returnBase(sym, price, hullUp, hullFlip, hl, score, rsiV) {
+  return {
+    sym, price:+price.toFixed(2),
+    hullUp, hullFlip, hullBars:hl.bars,
+    score, isBuy:false, rsiV, ema9Turn:false,
+    t1:+(price*1.02).toFixed(2),
+    t2:+(price*1.03).toFixed(2),
+    sl:+(price*0.985).toFixed(2)
+  };
+}
+
 function analyze(sym, d) {
   if(!d||d.length<40) return null;
   const price  = d[d.length-1];
@@ -249,10 +294,13 @@ function analyze(sym, d) {
   // Condiciones BUY
   const session    = getMarketSession();
   const isExtended = session==='PREMARKET' || session==='POSTMARKET';
-  const minScore   = isExtended ? MIN_SCORE-5 : MIN_SCORE;
-  const minBars    = isExtended ? 1 : 2; // 2 horas confirmadas en mercado abierto
-  const rsiMin     = isExtended ? 30 : 35;
-  const rsiMax     = isExtended ? 72 : 68;
+  // Extended hours: más estricto — score 80%, solo activos de alto volumen
+  const HIGH_VOL   = ['TSLA','AMD','PLTR','SOXL','MARA','HOOD','SOFI','RIVN','ORCL'];
+  const isHighVol  = HIGH_VOL.includes(sym);
+  const minScore   = isExtended ? 80 : MIN_SCORE; // 80% en extended, 70% en regular
+  const minBars    = isExtended ? 2 : 2;           // 2 barras siempre
+  const rsiMin     = isExtended ? 40 : 35;
+  const rsiMax     = isExtended ? 65 : 68;         // RSI más estricto en extended
 
   // BUY requiere:
   // 1. Hull16 flipea a alcista ↑
@@ -260,6 +308,9 @@ function analyze(sym, d) {
   // 3. Score mínimo
   // 4. RSI en zona válida
   const ema9Ok = ema9TurnUp || ema9Trending;
+
+  // En extended hours solo activos de alto volumen
+  if(isExtended && !isHighVol) return {...returnBase(sym,price,hullUp,hullFlip,hl,score,rsiV), isBuy:false};
 
   const isBuy = hullFlip && hullUp
     && ema9Ok
@@ -335,9 +386,9 @@ async function sendSignal(sig) {
                 : session==='POSTMARKET' ? '🌙 POST-MARKET'
                 : '📊 MERCADO ABIERTO';
   const sesWarn = session==='PREMARKET'
-    ? '\n⚠️ Pre-market: menor volumen · Spread más amplio'
+    ? '\n⚠️ *Pre-market · Score ≥80% · Alto volumen*\n💡 Spread amplio · Usar orden límite · Stop ajustado'
     : session==='POSTMARKET'
-    ? '\n⚠️ Post-market: menor liquidez · Spreads altos'
+    ? '\n⚠️ *Post-market · Score ≥80% · Alto volumen*\n💡 Menor liquidez · Posición reducida recomendada'
     : '';
 
   const msg =
@@ -360,16 +411,22 @@ async function sendSignal(sig) {
   const ok = await sendTG(TG_GROUP, msg);
   if(ok) {
     log(`✅ Telegram → grupo: ${sig.sym}`);
-    // Registrar trade abierto para seguimiento
-    openTrades[sig.sym] = {
-      sym:   sig.sym,
-      entry: sig.price,
-      t1:    sig.t1,
-      t2:    sig.t2,
-      sl:    sig.sl,
-      time:  Date.now(),
-      bars:  0
+    // Registrar trade abierto para seguimiento y diario
+    const tradeRecord = {
+      sym:    sig.sym,
+      entry:  sig.price,
+      t1:     sig.t1,
+      t2:     sig.t2,
+      sl:     sig.sl,
+      time:   Date.now(),
+      hora:   new Date().toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit',timeZone:'America/New_York'}),
+      bars:   0,
+      result: 'OPEN',
+      exit:   null,
+      pnl:    null
     };
+    openTrades[sig.sym] = tradeRecord;
+    tradeDiary.push(tradeRecord);
     log(`📋 Trade abierto: ${sig.sym} entrada $${sig.price} · T1 $${sig.t1} · Stop $${sig.sl}`);
   }
   return ok;
@@ -381,7 +438,7 @@ async function analyzeRadar(sym, d, lock) {
   const price = d[d.length-1];
 
   // Filtro rango $5-$20
-  if(price < 5 || price > 20) return null;
+  if(price < 3 || price > 50) return null;
 
   const h16   = hma16(d);
   const h16p  = d.length>17 ? hma16(d.slice(0,-1)) : null;
@@ -482,8 +539,8 @@ async function runRadarTop5() {
   });
 
   msg += `━━━━━━━━━━━━━━━━━━━━\n`
-    +`💡 Estas son oportunidades nuevas del día\n`
-    +`📋 Tu watchlist fija sigue monitoreándose\n`
+    +`💡 Oportunidades nuevas del día\n`
+    +`📋 Watchlist fija sigue monitoreándose\n`
     +`🤖 @Buyscanertradyng_bot`;
 
   await sendTG(TG_GROUP, msg);
@@ -492,19 +549,143 @@ async function runRadarTop5() {
   log(`✅ Top5 enviado: ${top5.map(s=>s.sym).join(', ')}`);
 }
 
+// ── SCANNER DE SEÑALES EN TIEMPO REAL ────────
+// Corre igual que el watchlist pero con el universo del scanner
+async function runScannerSignals() {
+  const session = getMarketSession();
+  if(session==='WEEKEND'||session==='CLOSED') return;
+  if(!marketOK && session==='OPEN') return;
+
+  log(`🔭 Scanner dinámico: ${SCANNER.length} empresas...`);
+  let found = 0;
+
+  for(let i=0; i<SCANNER.length; i+=4) {
+    const batch = SCANNER.slice(i,i+4).filter(u=>!WATCHLIST_SYMS.has(u.sym));
+    const res = await Promise.all(batch.map(async u => {
+      try {
+        const bars = await fetchBars(u.sym);
+        if(bars?.length>=40) {
+          const sig = analyze(u.sym, bars);
+          if(sig) return {...sig, name:u.name, sector:u.sector};
+        }
+      } catch(e){}
+      return null;
+    }));
+
+    for(const sig of res) {
+      if(!sig||!sig.isBuy) continue;
+
+      // Verificar precio en rango $3-$50
+      if(sig.price < 3 || sig.price > 50) continue;
+
+      // Bloqueo por símbolo
+      const today = new Date().toISOString().split('T')[0];
+      const key   = `SCAN_${sig.sym}_${today}`;
+      if(alerted[key]) continue;
+      alerted[key] = true;
+      setTimeout(()=>delete alerted[key], BLOCK_HOURS*60*60*1000);
+
+      log(`🔭 SCANNER SEÑAL: ${sig.sym} $${sig.price} Score:${sig.score}%`);
+
+      // Enviar señal igual que watchlist pero con etiqueta SCANNER
+      const hora = new Date().toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit',timeZone:'America/New_York'});
+      const sectorIcon = {tech:'💻',semi:'🔬',energy:'⚡'};
+      const ic = sectorIcon[sig.sector]||'📊';
+
+      const msg =
+        `🔭 *SEÑAL SCANNER — ${ic} ${sig.sym}*
+`
+        +`━━━━━━━━━━━━━━━━━━━━
+`
+        +`🏢 *${sig.sym}* — ${sig.name}
+`
+        +`💵 Precio: *$${sig.price}*
+`
+        +`📊 Confianza: *${sig.score}%*
+`
+        +`🌎 SPY: ${spyScore}%
+`
+        +`━━━━━━━━━━━━━━━━━━━━
+`
+        +`✅ Target +2%: *$${sig.t1}*
+`
+        +`✅ Target +3%: *$${sig.t2}*
+`
+        +`🛑 Stop -1.5%: *$${sig.sl}*
+`
+        +`━━━━━━━━━━━━━━━━━━━━
+`
+        +`🎯 Hull16 ALCISTA ↑ · ${sig.hullBars} hora(s)
+`
+        +(sig.ema9Turn?`📊 EMA9 giró ALCISTA ↑
+`:`📊 EMA9 tendencia alcista
+`)
+        +`⏰ ${hora} ET
+`
+        +`💡 Esta acción no está en tu watchlist fija`;
+
+      const ok = await sendTG(TG_GROUP, msg);
+      if(ok) {
+        sigCount++; found++;
+        // Registrar en trades abiertos para seguimiento de salida
+        const tradeRecord = {
+          sym:sig.sym, entry:sig.price, t1:sig.t1, t2:sig.t2, sl:sig.sl,
+          time:Date.now(),
+          hora:new Date().toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit',timeZone:'America/New_York'}),
+          bars:0, result:'OPEN', exit:null, pnl:null
+        };
+        openTrades[sig.sym] = tradeRecord;
+        tradeDiary.push(tradeRecord);
+      }
+    }
+    await new Promise(r=>setTimeout(r,400));
+  }
+
+  if(found>0) log(`🔭 Scanner: ${found} señales nuevas`);
+  else log(`🔭 Scanner: sin señales nuevas · ${SCANNER.length} empresas analizadas`);
+}
+
 async function sendDailySummary() {
   const upMins = Math.round((Date.now()-startTime)/60000);
-  const msg =
+
+  // Calcular estadísticas del diario
+  const wins   = tradeDiary.filter(t=>t.result==='WIN+2'||t.result==='WIN+3');
+  const losses = tradeDiary.filter(t=>t.result==='LOSS');
+  const open   = tradeDiary.filter(t=>t.result==='OPEN');
+  const closed = wins.length + losses.length;
+  const rate   = closed>0 ? Math.round(wins.length/closed*100) : 0;
+  const pnlNet = tradeDiary.filter(t=>t.pnl!==null).reduce((a,t)=>a+(t.pnl||0),0);
+
+  let msg =
     `📋 *RESUMEN DEL DÍA*\n`
-    +`━━━━━━━━━━━━━━━━━━━━\n`
-    +`🤖 Agente activo ${upMins < 60 ? upMins+'m' : Math.floor(upMins/60)+'h'+upMins%60+'m'}\n`
-    +`🔍 Escaneos: ${scanCount}\n`
-    +`📈 Señales enviadas: ${sigCount}\n`
-    +`🌎 SPY final: ${spyScore}%\n`
+    +`━━━━━━━━━━━━━━━━━━━━\n`;
+
+  // Detalle de cada trade
+  if(tradeDiary.length>0) {
+    tradeDiary.forEach(t => {
+      const icon = t.result==='WIN+2'||t.result==='WIN+3'?'✅':t.result==='LOSS'?'🛑':'⏳';
+      const res  = t.result==='WIN+2'?'+2%':t.result==='WIN+3'?'+3%':t.result==='LOSS'?'-1.5%':'abierto';
+      msg += `${icon} *${t.sym}* $${t.entry} → ${t.exit?'$'+t.exit:'-'} *${res}* · ${t.hora} ET\n`;
+    });
+    msg += `━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `📊 Total: ${tradeDiary.length} · ✅ ${wins.length} · 🛑 ${losses.length} · ⏳ ${open.length}\n`;
+    msg += `🎯 Tasa: *${rate}%* · P&L neto: *${pnlNet>=0?'+':''}${pnlNet.toFixed(1)}%*\n`;
+  } else {
+    msg += `Sin trades hoy\n`;
+  }
+
+  msg += `━━━━━━━━━━━━━━━━━━━━\n`
+    +`🔍 Escaneos: ${scanCount} · Señales: ${sigCount}\n`
+    +`🌎 SPY: ${spyScore}% · Activo ${upMins<60?upMins+'m':Math.floor(upMins/60)+'h'}\n`
     +`━━━━━━━━━━━━━━━━━━━━\n`
     +`Hasta mañana 👋`;
+
   await sendTG(TG_GROUP, msg);
   await sendTG(TG_FELIPE, msg);
+
+  // Limpiar diario para el día siguiente
+  tradeDiary = [];
+  log(`📋 Resumen enviado · ${tradeDiary.length} trades registrados`);
 }
 
 // ── HORA ET ──────────────────────────────────
@@ -586,17 +767,27 @@ async function checkExits() {
 
         // Si llega a T2 (+3%) cerrar completamente
         if(price >= trade.t2) {
+          const pnl2 = +(((price-trade.entry)/trade.entry)*100).toFixed(2);
           await sendTG(TG_GROUP,
             `🏆 *TARGET +3% ALCANZADO — ${sym}*
 `
             +`━━━━━━━━━━━━━━━━━━━━
 `
-            +`💰 Ganancia: *+${+(((price-trade.entry)/trade.entry)*100).toFixed(2)}%*
+            +`💰 Ganancia: *+${pnl2}%*
 `
             +`🎉 Excelente trade · Cerrar posición completa`
           );
+          // Registrar en diario
+          trade.result = 'WIN+3';
+          trade.exit   = +price.toFixed(2);
+          trade.pnl    = pnl2;
           delete openTrades[sym];
-          log(`✅ Trade cerrado: ${sym} con ganancia`);
+          log(`✅ Trade cerrado +3%: ${sym}`);
+        } else {
+          // Registrar T1 hit en diario
+          trade.result = 'WIN+2';
+          trade.exit   = +price.toFixed(2);
+          trade.pnl    = ganoPct;
         }
         continue;
       }
@@ -622,6 +813,10 @@ async function checkExits() {
 `
           +`💡 Salir de la posición ahora`
         );
+        // Registrar en diario
+        trade.result = 'LOSS';
+        trade.exit   = +price.toFixed(2);
+        trade.pnl    = perdPct;
         delete openTrades[sym];
         log(`📋 Trade cerrado por stop: ${sym}`);
         continue;
@@ -683,18 +878,23 @@ async function runScan() {
   // SPY cada 3 ciclos (solo en mercado abierto)
   if(scanCount%3===1 && open) await checkSPY();
 
-  // Pre/Post market — el SPY no aplica igual
+  // Pre/Post market — señales activas con criterios ajustados
   if(extended) {
-    log(`⚡ HORARIO EXTENDIDO (${session}) · Señales activas con criterios ajustados`);
-    // En horario extendido no requerimos SPY favorable
-    marketOK = true;
+    log(`⚡ HORARIO EXTENDIDO (${session}) · Score mínimo ${MIN_SCORE+10}% · RSI 40-65`);
+    marketOK = true; // Sin filtro SPY en extended hours
+  } else if(!open) {
+    log(`${session} · Fuera de horario`);
+    return;
   } else if(!marketOK) {
     log(`SPY ${spyScore}% — señales bloqueadas`);
     return;
   }
 
-  // Escanear en batches de 3
-  const syms = WATCHLIST.map(u=>u.sym);
+  // En horario extendido solo activos de alto volumen
+  const allSyms = WATCHLIST.map(u=>u.sym);
+  const highVol = ['TSLA', 'AMD', 'PLTR', 'SOXL', 'MARA', 'HOOD', 'SOFI', 'RIVN', 'IONQ', 'SOUN'];
+  const syms = extended ? allSyms.filter(s=>highVol.includes(s)) : allSyms;
+  if(extended) log(`⚡ Extended hours: escaneando ${syms.length} activos de alto volumen`);
   let found  = 0;
 
   for(let i=0; i<syms.length; i+=3) {
@@ -776,8 +976,9 @@ async function main() {
 
   // Loop cada N minutos
   setInterval(async () => {
-    await runScan();
-    await runRadarTop5();  // Top5 al inicio del mercado
+    await runScan();           // Watchlist fija
+    await runScannerSignals(); // Scanner dinámico — misma estrategia
+    await runRadarTop5();      // Top5 resumen matutino
     scheduleDailySummary();
   }, INTERVAL * 60 * 1000);
 }
