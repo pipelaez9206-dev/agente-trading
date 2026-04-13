@@ -134,6 +134,8 @@ let sigCount    = 0;
 let startTime   = Date.now();
 let radarScores = {}; // scores del radar Top5
 let top5Sent    = ''; // fecha del último Top5 enviado
+let openTrades  = {}; // trades abiertos monitoreando precio
+let tradeDiary  = []; // historial de trades del día
 
 // ── MATH ─────────────────────────────────────
 const sma = (d,n) => {
