@@ -168,12 +168,19 @@ function analyze(sym, d) {
   add(price>(h16||price),                             2);
   const score = max>0 ? Math.round(pts/max*100) : 50;
 
-  // Condiciones BUY estrictas
+  // Condiciones BUY — más permisivas en pre/post market
+  const session = getMarketSession();
+  const isExtended = session==='PREMARKET' || session==='POSTMARKET';
+  const minScore = isExtended ? MIN_SCORE-5 : MIN_SCORE; // 65% en extendido, 70% en abierto
+  const minBars  = isExtended ? 1 : 2; // 1 barra en extendido, 2 en abierto
+  const rsiMin   = isExtended ? 30 : 35;
+  const rsiMax   = isExtended ? 72 : 68;
+
   const isBuy = hullFlip && hullUp
-    && score >= MIN_SCORE
-    && hl.bars >= 2
+    && score >= minScore
+    && hl.bars >= minBars
     && !!(ma9&&ma20&&ma9>ma20)
-    && (rsiV===null||(rsiV>=35&&rsiV<=68));
+    && (rsiV===null||(rsiV>=rsiMin&&rsiV<=rsiMax));
 
   return {
     sym, price:+price.toFixed(2),
@@ -236,21 +243,31 @@ async function sendTG(chatId, msg) {
 
 async function sendSignal(sig) {
   const u = WATCHLIST.find(u=>u.sym===sig.sym)||{name:sig.sym};
-  const hora = new Date().toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit',timeZone:'America/New_York'});
+  const hora    = new Date().toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit',timeZone:'America/New_York'});
+  const session = getMarketSession();
+  const sesLabel= session==='PREMARKET'  ? '⚡ PRE-MARKET'
+                : session==='POSTMARKET' ? '🌙 POST-MARKET'
+                : '📊 MERCADO ABIERTO';
+  const sesWarn = session==='PREMARKET'
+    ? '\n⚠️ Pre-market: menor volumen · Spread más amplio'
+    : session==='POSTMARKET'
+    ? '\n⚠️ Post-market: menor liquidez · Spreads altos'
+    : '';
+
   const msg =
-    `📈 *SEÑAL DE COMPRA*\n`
+    `📈 *SEÑAL DE COMPRA — ${sesLabel}*\n`
     +`━━━━━━━━━━━━━━━━━━━━\n`
     +`🏢 *${sig.sym}* — ${u.name}\n`
     +`💵 Precio: *$${sig.price}*\n`
     +`📊 Confianza: *${sig.score}%*\n`
-    +`🌎 SPY: ${spyScore}% ${marketOK?'✅':'⚠️'}\n`
+    +(session==='OPEN'?`🌎 SPY: ${spyScore}% ${marketOK?'✅':'⚠️'}\n`:'')
     +`━━━━━━━━━━━━━━━━━━━━\n`
     +`✅ Target +2%: *$${sig.t1}*\n`
     +`✅ Target +3%: *$${sig.t2}*\n`
     +`🛑 Stop -1.5%: *$${sig.sl}*\n`
     +`━━━━━━━━━━━━━━━━━━━━\n`
     +`🎯 Hull16 ALCISTA ↑ · ${sig.hullBars} barra(s)\n`
-    +`⏰ ${hora} ET`;
+    +`⏰ ${hora} ET${sesWarn}`;
 
   // Enviar al grupo
   const ok = await sendTG(TG_GROUP, msg);
@@ -277,11 +294,25 @@ async function sendDailySummary() {
 function getET() {
   return new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
 }
-function isMarketOpen() {
+function getMarketSession() {
   const et = getET();
   const d  = et.getDay();
   const t  = et.getHours()*60 + et.getMinutes();
-  return d>=1 && d<=5 && t>=570 && t<960; // 9:30am-4pm ET
+
+  if(d===0 || d===6) return 'WEEKEND'; // fin de semana
+
+  if(t>=240  && t<570)  return 'PREMARKET';  // 4:00am - 9:30am ET
+  if(t>=570  && t<960)  return 'OPEN';       // 9:30am - 4:00pm ET
+  if(t>=960  && t<1200) return 'POSTMARKET'; // 4:00pm - 8:00pm ET
+  return 'CLOSED'; // noche
+}
+function isMarketOpen() {
+  const s = getMarketSession();
+  return s==='OPEN';
+}
+function isExtendedHours() {
+  const s = getMarketSession();
+  return s==='PREMARKET' || s==='POSTMARKET';
 }
 
 // ── LOG ──────────────────────────────────────
@@ -295,19 +326,27 @@ function log(msg) {
 // ── SCAN CYCLE ───────────────────────────────
 async function runScan() {
   scanCount++;
-  const open = isMarketOpen();
-  log(`=== Escaneo #${scanCount} · Mercado ${open?'ABIERTO':'CERRADO'} ===`);
+  const session = getMarketSession();
+  const open    = session==='OPEN';
+  const extended= session==='PREMARKET' || session==='POSTMARKET';
 
-  // SPY cada 3 ciclos
-  if(scanCount%3===1) await checkSPY();
+  log(`=== Escaneo #${scanCount} · ${session} ===`);
 
-  // Si mercado cerrado, no escanear acciones
-  if(!open) {
-    log('Mercado cerrado · Esperando apertura');
+  // Fin de semana — no escanear
+  if(session==='WEEKEND' || session==='CLOSED') {
+    log('Fuera de horario · Próximo scan en horario extendido (4am ET)');
     return;
   }
 
-  if(!marketOK) {
+  // SPY cada 3 ciclos (solo en mercado abierto)
+  if(scanCount%3===1 && open) await checkSPY();
+
+  // Pre/Post market — el SPY no aplica igual
+  if(extended) {
+    log(`⚡ HORARIO EXTENDIDO (${session}) · Señales activas con criterios ajustados`);
+    // En horario extendido no requerimos SPY favorable
+    marketOK = true;
+  } else if(!marketOK) {
     log(`SPY ${spyScore}% — señales bloqueadas`);
     return;
   }
@@ -377,7 +416,11 @@ async function main() {
     +`⏱ Escaneo cada ${INTERVAL} minutos\n`
     +`🎯 Score mínimo: ${MIN_SCORE}%\n`
     +`━━━━━━━━━━━━━━━━━━━━\n`
-    +`Las señales Hull16 llegarán aquí\n`
+    +`⏰ *Horarios activos (ET):*\n`
+    +`⚡ Pre-market: 4:00am - 9:30am\n`
+    +`📊 Mercado: 9:30am - 4:00pm\n`
+    +`🌙 Post-market: 4:00pm - 8:00pm\n`
+    +`━━━━━━━━━━━━━━━━━━━━\n`
     +`🤖 @Buyscanertradyng_bot`
   );
 
