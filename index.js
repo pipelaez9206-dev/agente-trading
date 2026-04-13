@@ -358,7 +358,20 @@ async function sendSignal(sig) {
 
   // Enviar al grupo
   const ok = await sendTG(TG_GROUP, msg);
-  if(ok) log(`✅ Telegram → grupo: ${sig.sym}`);
+  if(ok) {
+    log(`✅ Telegram → grupo: ${sig.sym}`);
+    // Registrar trade abierto para seguimiento
+    openTrades[sig.sym] = {
+      sym:   sig.sym,
+      entry: sig.price,
+      t1:    sig.t1,
+      t2:    sig.t2,
+      sl:    sig.sl,
+      time:  Date.now(),
+      bars:  0
+    };
+    log(`📋 Trade abierto: ${sig.sym} entrada $${sig.price} · T1 $${sig.t1} · Stop $${sig.sl}`);
+  }
   return ok;
 }
 
@@ -527,6 +540,128 @@ function log(msg) {
   console.log(`[${date} ${time} ET] ${msg}`);
 }
 
+// ── MONITOREO DE SALIDAS ─────────────────────
+async function checkExits() {
+  const openSyms = Object.keys(openTrades);
+  if(!openSyms.length) return;
+
+  log(`👀 Monitoreando salidas: ${openSyms.join(', ')}`);
+
+  for(const sym of openSyms) {
+    const trade = openTrades[sym];
+    try {
+      // Obtener precio actual
+      const bars = await fetchBars(sym);
+      if(!bars||!bars.length) continue;
+      const price = bars[bars.length-1];
+      trade.bars++;
+
+      // ── SEÑAL DE SALIDA 1: TARGET +2% ──
+      if(price >= trade.t1) {
+        const ganoPct = +(((price-trade.entry)/trade.entry)*100).toFixed(2);
+        log(`🎯 TARGET ALCANZADO: ${sym} $${price} ≥ T1 $${trade.t1} (+${ganoPct}%)`);
+        await sendTG(TG_GROUP,
+          `✅ *TARGET ALCANZADO — ${sym}*
+`
+          +`━━━━━━━━━━━━━━━━━━━━
+`
+          +`💵 Entrada:  $${trade.entry}
+`
+          +`💰 Precio:   *$${price.toFixed(2)}*
+`
+          +`📈 Ganancia: *+${ganoPct}%*
+`
+          +`━━━━━━━━━━━━━━━━━━━━
+`
+          +`🎯 Target +2% alcanzado
+`
+          +`💡 Considera vender la mitad y mover stop a entrada
+`
+          +`⏰ ${new Date().toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit',timeZone:'America/New_York'})} ET`
+        );
+        // Actualizar trade — subir stop a entrada (trailing)
+        trade.sl    = trade.entry; // stop a break-even
+        trade.t1Hit = true;
+        log(`📋 Stop movido a entrada $${trade.entry} (break-even)`);
+
+        // Si llega a T2 (+3%) cerrar completamente
+        if(price >= trade.t2) {
+          await sendTG(TG_GROUP,
+            `🏆 *TARGET +3% ALCANZADO — ${sym}*
+`
+            +`━━━━━━━━━━━━━━━━━━━━
+`
+            +`💰 Ganancia: *+${+(((price-trade.entry)/trade.entry)*100).toFixed(2)}%*
+`
+            +`🎉 Excelente trade · Cerrar posición completa`
+          );
+          delete openTrades[sym];
+          log(`✅ Trade cerrado: ${sym} con ganancia`);
+        }
+        continue;
+      }
+
+      // ── SEÑAL DE SALIDA 2: STOP LOSS -1.5% ──
+      if(price <= trade.sl) {
+        const perdPct = +(((price-trade.entry)/trade.entry)*100).toFixed(2);
+        log(`🛑 STOP ACTIVADO: ${sym} $${price} ≤ Stop $${trade.sl} (${perdPct}%)`);
+        await sendTG(TG_GROUP,
+          `🛑 *STOP LOSS — ${sym}*
+`
+          +`━━━━━━━━━━━━━━━━━━━━
+`
+          +`💵 Entrada:   $${trade.entry}
+`
+          +`💰 Precio:    *$${price.toFixed(2)}*
+`
+          +`📉 Resultado: *${perdPct}%*
+`
+          +`━━━━━━━━━━━━━━━━━━━━
+`
+          +`🛡️ Stop activado · El sistema te protegió
+`
+          +`💡 Salir de la posición ahora`
+        );
+        delete openTrades[sym];
+        log(`📋 Trade cerrado por stop: ${sym}`);
+        continue;
+      }
+
+      // ── SEÑAL DE SALIDA 3: Hull16 gira bajista ──
+      if(bars.length>=40) {
+        const sig = analyze(sym, bars);
+        if(sig && !sig.hullUp && trade.bars >= 2) {
+          log(`⚠️ Hull16 giró bajista: ${sym} — considerar salida`);
+          await sendTG(TG_GROUP,
+            `⚠️ *HULL16 GIRÓ BAJISTA — ${sym}*
+`
+            +`━━━━━━━━━━━━━━━━━━━━
+`
+            +`💵 Entrada:   $${trade.entry}
+`
+            +`💰 Precio:    $${price.toFixed(2)}
+`
+            +`📊 P&L:       ${price>=trade.entry?'+':''}${+(((price-trade.entry)/trade.entry)*100).toFixed(2)}%
+`
+            +`━━━━━━━━━━━━━━━━━━━━
+`
+            +`🔄 Tendencia cambió · Evalúa salir
+`
+            +`⚠️ No es señal de stop automático`
+          );
+          // No cerrar automáticamente — solo avisar
+        }
+      }
+
+      log(`📊 ${sym}: $${price.toFixed(2)} · Entrada $${trade.entry} · P&L ${price>=trade.entry?'+':''}${+(((price-trade.entry)/trade.entry)*100).toFixed(2)}%`);
+
+    } catch(e) {
+      log(`Exit check ${sym}: ${e.message}`);
+    }
+    await new Promise(r=>setTimeout(r,500));
+  }
+}
+
 // ── SCAN CYCLE ───────────────────────────────
 async function runScan() {
   scanCount++;
@@ -534,7 +669,10 @@ async function runScan() {
   const open    = session==='OPEN';
   const extended= session==='PREMARKET' || session==='POSTMARKET';
 
-  log(`=== Escaneo #${scanCount} · ${session} ===`);
+  log(`=== Escaneo #${scanCount} · ${session} · Trades abiertos: ${Object.keys(openTrades).length} ===`);
+
+  // Verificar salidas de trades abiertos PRIMERO
+  await checkExits();
 
   // Fin de semana — no escanear
   if(session==='WEEKEND' || session==='CLOSED') {
