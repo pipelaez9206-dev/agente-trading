@@ -198,30 +198,38 @@ async function fetchT(url, ms=7000) {
 // ── FETCH BARRAS ─────────────────────────────
 async function fetchBars(sym) {
   const to   = new Date();
-  const from = new Date(to - 30*864e5); // 30 días para tener suficientes velas 1H
+  const from = new Date(to - 30*864e5);
   const fmt  = d => d.toISOString().split('T')[0];
 
-  // Polygon — velas de 1 HORA
+  // Polygon — velas de 1 HORA con volumen
   try {
     const url = `https://api.polygon.io/v2/aggs/ticker/${sym}/range/1/hour/${fmt(from)}/${fmt(to)}?adjusted=true&sort=asc&limit=500&apiKey=${POLY}`;
     const r = await fetchT(url, 6000);
     const d = await r.json();
     if(d?.results?.length>=40) {
       log(`${sym}: ${d.results.length} velas 1H desde Polygon`);
-      return d.results.map(b=>+b.c.toFixed(2));
+      return {
+        closes:  d.results.map(b=>+b.c.toFixed(2)),
+        volumes: d.results.map(b=>b.v||0),
+        highs:   d.results.map(b=>+b.h.toFixed(2)),
+        lows:    d.results.map(b=>+b.l.toFixed(2)),
+      };
     }
   } catch(e) {}
 
-  // Yahoo como respaldo — velas 1H
+  // Yahoo como respaldo
   try {
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=1h&range=30d`;
     const r = await fetchT(url, 6000);
     const d = await r.json();
-    const cl = d?.chart?.result?.[0]?.indicators?.quote?.[0]?.close
-      ?.filter(v=>v!=null&&v>0).map(v=>+v.toFixed(2));
+    const q  = d?.chart?.result?.[0]?.indicators?.quote?.[0];
+    const cl = q?.close?.filter(v=>v!=null&&v>0).map(v=>+v.toFixed(2));
+    const vl = q?.volume?.map(v=>v||0) || [];
+    const hi = q?.high?.filter(v=>v!=null).map(v=>+v.toFixed(2)) || [];
+    const lo = q?.low?.filter(v=>v!=null).map(v=>+v.toFixed(2)) || [];
     if(cl?.length>=40) {
       log(`${sym}: ${cl.length} velas 1H desde Yahoo`);
-      return cl;
+      return {closes:cl, volumes:vl, highs:hi, lows:lo};
     }
   } catch(e) {}
 
@@ -241,7 +249,10 @@ function returnBase(sym, price, hullUp, hullFlip, hl, score, rsiV) {
   };
 }
 
-function analyze(sym, d) {
+function analyze(sym, bars) {
+  // Aceptar tanto array simple como objeto con closes/volumes
+  const d = Array.isArray(bars) ? bars : bars?.closes;
+  const volumes = Array.isArray(bars) ? [] : (bars?.volumes||[]);
   if(!d||d.length<40) return null;
   const price  = d[d.length-1];
   const h16    = hma16(d);
@@ -252,6 +263,12 @@ function analyze(sym, d) {
   const ma40   = sma(d,40);
   const rsiV   = rsi14(d);
   if(!h16||!ma20) return null;
+
+  // Análisis de volumen
+  const volCurrent = volumes.length>0 ? volumes[volumes.length-1] : 0;
+  const volAvg20   = volumes.length>=20 ? volumes.slice(-21,-1).reduce((a,b)=>a+b,0)/20 : 0;
+  const volRatio   = volAvg20>0 ? +(volCurrent/volAvg20).toFixed(2) : 0;
+  const highVolume = volRatio >= 1.5; // volumen 1.5x el promedio
 
   const hullUp   = h16p ? h16>h16p : true;
   const hullFlip = h16&&h16p&&h16pp ? ((h16>h16p)!==(h16p>h16pp)) : false;
@@ -287,11 +304,12 @@ function analyze(sym, d) {
   let pts=0, max=0;
   const add = (ok,w) => {max+=w; if(ok) pts+=w;};
   add(hullUp,         4); // Hull16 apunta alcista
-  add(ema9TurnUp,     5); // EMA9 cambió a tendencia alcista — señal fuerte
-  add(ema9Trending,   2); // EMA9 subiendo (confirmador)
+  add(ema9TurnUp,     5); // EMA9 cambió a tendencia alcista
+  add(ema9Trending,   2); // EMA9 subiendo
   add(!!(ma20&&ma40&&ma20>ma40), 2); // MA20 sobre MA40
   add(!!(rsiV&&rsiV>=35&&rsiV<=68), 2); // RSI zona sana
   add(price>(h16||price), 2); // precio sobre Hull16
+  add(highVolume, 3); // volumen alto — confirmador importante
   const score = max>0 ? Math.round(pts/max*100) : 50;
 
   // Condiciones BUY
@@ -321,14 +339,21 @@ function analyze(sym, d) {
     && hl.bars >= minBars
     && (rsiV===null||(rsiV>=rsiMin&&rsiV<=rsiMax));
 
+  // ATR estimado para stop dinámico
+  const recentRange = d.slice(-10).map((v,i,a)=>i>0?Math.abs(v-a[i-1]):0).reduce((a,b)=>a+b,0)/10;
+  const dynamicSL   = +(price - recentRange*1.5).toFixed(2);
+
   return {
     sym, price:+price.toFixed(2),
     hullUp, hullFlip, hullBars:hl.bars,
     score, isBuy, rsiV,
     ema9Turn: ema9TurnUp,
+    volRatio, highVolume,
     t1: +(price*1.02).toFixed(2),
     t2: +(price*1.03).toFixed(2),
-    sl: +(price*0.985).toFixed(2)
+    t3: +(price*1.04).toFixed(2),
+    sl: +(price*0.985).toFixed(2),
+    dynamicSL: dynamicSL < price ? dynamicSL : +(price*0.985).toFixed(2),
   };
 }
 
@@ -388,33 +413,60 @@ async function sendTG(chatId, msg) {
 }
 
 async function sendSignal(sig) {
-  const u = WATCHLIST.find(u=>u.sym===sig.sym)||{name:sig.sym};
+  const u       = WATCHLIST.find(u=>u.sym===sig.sym)||{name:sig.sym};
   const hora    = new Date().toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit',timeZone:'America/New_York'});
   const session = getMarketSession();
   const sesLabel= session==='PREMARKET'  ? '⚡ PRE-MARKET'
                 : session==='POSTMARKET' ? '🌙 POST-MARKET'
                 : '📊 MERCADO ABIERTO';
+
+  // Calidad de la señal
+  const calidad = sig.score>=85 ? '🔥 MUY ALTA'
+                : sig.score>=75 ? '✅ ALTA'
+                : '🟡 MEDIA';
+
+  // Hora óptima
+  const etH = getET().getHours();
+  const etM = getET().getMinutes();
+  const etMin = etH*60+etM;
+  const horaOptima = (etMin>=570&&etMin<=660)||(etMin>=840&&etMin<=960);
+  const horaMsg = horaOptima ? '✅ Hora óptima de entrada' : '⚠️ Hora no óptima · mayor cautela';
+
   const sesWarn = session==='PREMARKET'
-    ? '\n⚠️ *Pre-market · Score ≥80% · Alto volumen*\n💡 Spread amplio · Usar orden límite · Stop ajustado'
+    ? '\n⚠️ PRE-MARKET · Usar orden límite · Posición reducida'
     : session==='POSTMARKET'
-    ? '\n⚠️ *Post-market · Score ≥80% · Alto volumen*\n💡 Menor liquidez · Posición reducida recomendada'
+    ? '\n⚠️ POST-MARKET · Baja liquidez · Posición reducida'
     : '';
 
   const msg =
-    `📈 *SEÑAL DE COMPRA — ${sesLabel}*\n`
+    `📈 SEÑAL DE COMPRA — ${sesLabel}\n`
     +`━━━━━━━━━━━━━━━━━━━━\n`
-    +`🏢 *${sig.sym}* — ${u.name}\n`
-    +`💵 Precio: *$${sig.price}*\n`
-    +`📊 Confianza: *${sig.score}%*\n`
-    +(session==='OPEN'?`🌎 SPY: ${spyScore}% ${marketOK?'✅':'⚠️'}\n`:'')
+    +`🏢 ${sig.sym} — ${u.name}\n`
     +`━━━━━━━━━━━━━━━━━━━━\n`
-    +`✅ Target +2%: *$${sig.t1}*\n`
-    +`✅ Target +3%: *$${sig.t2}*\n`
-    +`🛑 Stop -1.5%: *$${sig.sl}*\n`
+    +`📊 ANÁLISIS DE ENTRADA:\n`
+    +`💵 Precio entrada: $${sig.price}\n`
+    +`⭐ Calidad señal: ${calidad} (${sig.score}%)\n`
+    +`⏰ ${horaMsg}\n`
+    +`🌎 SPY: ${spyScore}% ${marketOK?'✅ Mercado alcista':'⚠️ Mercado neutral'}\n`
+    +`📊 Hull16: ALCISTA ↑ · ${sig.hullBars} hora(s)\n`
+    +(sig.ema9Turn?`📊 EMA9: Giró ALCISTA ↑ (señal fuerte)\n`:`📊 EMA9: Tendencia alcista\n`)
+    +(sig.volRatio>0?`📦 Volumen: ${sig.volRatio}x promedio ${sig.highVolume?'✅ ALTO':'⚠️ normal'}\n`:'')
+    +`📉 RSI: ${sig.rsiV||'─'} ${sig.rsiV&&sig.rsiV<50?'(zona de compra)':sig.rsiV&&sig.rsiV<65?'(zona sana)':''}\n`
     +`━━━━━━━━━━━━━━━━━━━━\n`
-    +`🎯 Hull16 ALCISTA ↑ · ${sig.hullBars} hora(s) confirmadas\n`
-    +(sig.ema9Turn?`📊 EMA9 cambió a ALCISTA ↑ (giro de tendencia)\n`:`📊 EMA9 en tendencia alcista ↑\n`)
-    +`⏰ ${hora} ET${sesWarn}`;
+    +`🎯 PLAN DE TRADING:\n`
+    +`🟢 ENTRAR: $${sig.price}\n`
+    +`📈 Target 1 (+2%): $${sig.t1} → vender 50%\n`
+    +`📈 Target 2 (+3%): $${sig.t2} → vender 30%\n`
+    +`📈 Target 3 (+4%): $${sig.t3} → vender 20%\n`
+    +`🛑 Stop Loss: $${sig.sl} (-1.5%)\n`
+    +`━━━━━━━━━━━━━━━━━━━━\n`
+    +`💡 INSTRUCCIONES:\n`
+    +`1. Confirmar en TradingView\n`
+    +`2. Usar máximo 2% del capital\n`
+    +`3. Colocar stop en $${sig.sl} ANTES de entrar\n`
+    +`4. Al llegar T1 mover stop a entrada\n`
+    +`━━━━━━━━━━━━━━━━━━━━\n`
+    +`${hora} ET${sesWarn}`;
 
   // Enviar al grupo
   const ok = await sendTG(TG_GROUP, msg);
@@ -529,17 +581,18 @@ async function runRadarTop5() {
   const medals = ['🥇','🥈','🥉','4️⃣','5️⃣'];
   const sectorIcon = {tech:'💻',semi:'🔬',energy:'⚡'};
 
-  let msg = `🔭 *SCANNER DIARIO — TOP 5 NUEVAS OPORTUNIDADES*\n`
+  let msg = `👀 RADAR DIARIO — TOP 5 PARA SEGUIMIENTO\n`
     +`━━━━━━━━━━━━━━━━━━━━\n`
-    +`📊 Empresas fuera de tu watchlist fija\n`
-    +`💵 Rango: $5-$20 · Velas 1H\n`
-    +`🔬 Tech · Semis · Energía · IA\n`
+    +`⚠️ ESTAS SON PARA VIGILAR, NO PARA COMPRAR\n`
+    +`Esperar señal de COMPRA separada del agente\n`
+    +`━━━━━━━━━━━━━━━━━━━━\n`
+    +`📊 Fuera de watchlist fija · Velas 1H\n`
     +`🌎 SPY: ${spyScore}% · ${hora} ET\n`
     +`━━━━━━━━━━━━━━━━━━━━\n`;
 
   top5.forEach((s,i) => {
     const ic = sectorIcon[s.sector]||'📊';
-    const estado = s.hullUp&&s.score>=65?'🟢 BUENA':s.hullUp?'🟡 VIGILAR':'⚪ ESPERAR';
+    const estado = s.hullUp&&s.score>=65?'👀 VIGILAR':s.hullUp?'👀 VIGILAR':'⚪ ESPERAR';
     msg += `${medals[i]} ${ic} *${s.sym}* — ${s.name}\n`
       +`   ${estado} · Score: ${s.score}%\n`
       +`   💵 $${s.price} · T1: $${s.t1} · Stop: $${s.sl}\n`
@@ -548,8 +601,10 @@ async function runRadarTop5() {
   });
 
   msg += `━━━━━━━━━━━━━━━━━━━━\n`
-    +`💡 Oportunidades nuevas del día\n`
-    +`📋 Watchlist fija sigue monitoreándose\n`
+    +`Si el agente detecta señal de COMPRA\n`
+    +`te llegara un mensaje separado con:\n`
+    +`📈 SEÑAL DE COMPRA — [SIMBOLO]\n`
+    +`━━━━━━━━━━━━━━━━━━━━\n`
     +`🤖 @Buyscanertradyng_bot`;
 
   await sendTG(TG_GROUP, msg);
@@ -573,7 +628,7 @@ async function runScannerSignals() {
     const res = await Promise.all(batch.map(async u => {
       try {
         const bars = await fetchBars(u.sym);
-        if(bars?.length>=40) {
+        if(bars?.closes?.length>=40||bars?.length>=40) {
           const sig = analyze(u.sym, bars);
           if(sig) return {...sig, name:u.name, sector:u.sector};
         }
@@ -741,7 +796,8 @@ async function checkExits() {
     const trade = openTrades[sym];
     try {
       // Obtener precio actual
-      const bars = await fetchBars(sym);
+      const barsData = await fetchBars(sym);
+      const bars = Array.isArray(barsData) ? barsData : barsData?.closes;
       if(!bars||!bars.length) continue;
       const price = bars[bars.length-1];
       trade.bars++;
@@ -750,24 +806,22 @@ async function checkExits() {
       if(price >= trade.t1) {
         const ganoPct = +(((price-trade.entry)/trade.entry)*100).toFixed(2);
         log(`🎯 TARGET ALCANZADO: ${sym} $${price} ≥ T1 $${trade.t1} (+${ganoPct}%)`);
+        const horaExit = new Date().toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit',timeZone:'America/New_York'});
         await sendTG(TG_GROUP,
-          `✅ *TARGET ALCANZADO — ${sym}*
-`
-          +`━━━━━━━━━━━━━━━━━━━━
-`
-          +`💵 Entrada:  $${trade.entry}
-`
-          +`💰 Precio:   *$${price.toFixed(2)}*
-`
-          +`📈 Ganancia: *+${ganoPct}%*
-`
-          +`━━━━━━━━━━━━━━━━━━━━
-`
-          +`🎯 Target +2% alcanzado
-`
-          +`💡 Considera vender la mitad y mover stop a entrada
-`
-          +`⏰ ${new Date().toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit',timeZone:'America/New_York'})} ET`
+          `✅ SEÑAL DE VENTA PARCIAL — ${sym}\n`
+          +`━━━━━━━━━━━━━━━━━━━━\n`
+          +`📊 TARGET +2% ALCANZADO\n`
+          +`━━━━━━━━━━━━━━━━━━━━\n`
+          +`💵 Entrada:   $${trade.entry}\n`
+          +`💰 Precio:    $${price.toFixed(2)}\n`
+          +`📈 Ganancia:  +${ganoPct}%\n`
+          +`━━━━━━━━━━━━━━━━━━━━\n`
+          +`🎯 ACCIÓN RECOMENDADA:\n`
+          +`1. VENDER 50% de tu posición AHORA\n`
+          +`2. Mover stop a precio de entrada $${trade.entry}\n`
+          +`3. Dejar el resto correr hacia T2 $${trade.t2}\n`
+          +`━━━━━━━━━━━━━━━━━━━━\n`
+          +`${horaExit} ET`
         );
         // Actualizar trade — subir stop a entrada (trailing)
         trade.sl    = trade.entry; // stop a break-even
@@ -778,13 +832,17 @@ async function checkExits() {
         if(price >= trade.t2) {
           const pnl2 = +(((price-trade.entry)/trade.entry)*100).toFixed(2);
           await sendTG(TG_GROUP,
-            `🏆 *TARGET +3% ALCANZADO — ${sym}*
-`
-            +`━━━━━━━━━━━━━━━━━━━━
-`
-            +`💰 Ganancia: *+${pnl2}%*
-`
-            +`🎉 Excelente trade · Cerrar posición completa`
+            `🏆 SEÑAL DE VENTA TOTAL — ${sym}\n`
+            +`━━━━━━━━━━━━━━━━━━━━\n`
+            +`📊 TARGET +3% ALCANZADO\n`
+            +`━━━━━━━━━━━━━━━━━━━━\n`
+            +`💵 Entrada:  $${trade.entry}\n`
+            +`💰 Precio:   $${price.toFixed(2)}\n`
+            +`📈 Ganancia: +${pnl2}%\n`
+            +`━━━━━━━━━━━━━━━━━━━━\n`
+            +`🎯 ACCIÓN: CERRAR POSICIÓN COMPLETA\n`
+            +`Vender el 100% restante ahora\n`
+            +`Excelente trade! 🎉`
           );
           // Registrar en diario
           trade.result = 'WIN+3';
@@ -805,22 +863,22 @@ async function checkExits() {
       if(price <= trade.sl) {
         const perdPct = +(((price-trade.entry)/trade.entry)*100).toFixed(2);
         log(`🛑 STOP ACTIVADO: ${sym} $${price} ≤ Stop $${trade.sl} (${perdPct}%)`);
+        const horaStop = new Date().toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit',timeZone:'America/New_York'});
         await sendTG(TG_GROUP,
-          `🛑 *STOP LOSS — ${sym}*
-`
-          +`━━━━━━━━━━━━━━━━━━━━
-`
-          +`💵 Entrada:   $${trade.entry}
-`
-          +`💰 Precio:    *$${price.toFixed(2)}*
-`
-          +`📉 Resultado: *${perdPct}%*
-`
-          +`━━━━━━━━━━━━━━━━━━━━
-`
-          +`🛡️ Stop activado · El sistema te protegió
-`
-          +`💡 Salir de la posición ahora`
+          `🛑 SEÑAL DE VENTA — STOP LOSS ${sym}\n`
+          +`━━━━━━━━━━━━━━━━━━━━\n`
+          +`📊 STOP LOSS ACTIVADO\n`
+          +`━━━━━━━━━━━━━━━━━━━━\n`
+          +`💵 Entrada:   $${trade.entry}\n`
+          +`💰 Precio:    $${price.toFixed(2)}\n`
+          +`📉 Resultado: ${perdPct}%\n`
+          +`━━━━━━━━━━━━━━━━━━━━\n`
+          +`🎯 ACCIÓN INMEDIATA:\n`
+          +`VENDER TODO ahora al precio de mercado\n`
+          +`No esperar — el stop protege tu capital\n`
+          +`━━━━━━━━━━━━━━━━━━━━\n`
+          +`El sistema te protegió. Siguiente oportunidad!\n`
+          +`${horaStop} ET`
         );
         // Registrar en diario
         trade.result = 'LOSS';
@@ -836,22 +894,21 @@ async function checkExits() {
         const sig = analyze(sym, bars);
         if(sig && !sig.hullUp && trade.bars >= 2) {
           log(`⚠️ Hull16 giró bajista: ${sym} — considerar salida`);
+          const pnlNow = +(((price-trade.entry)/trade.entry)*100).toFixed(2);
           await sendTG(TG_GROUP,
-            `⚠️ *HULL16 GIRÓ BAJISTA — ${sym}*
-`
-            +`━━━━━━━━━━━━━━━━━━━━
-`
-            +`💵 Entrada:   $${trade.entry}
-`
-            +`💰 Precio:    $${price.toFixed(2)}
-`
-            +`📊 P&L:       ${price>=trade.entry?'+':''}${+(((price-trade.entry)/trade.entry)*100).toFixed(2)}%
-`
-            +`━━━━━━━━━━━━━━━━━━━━
-`
-            +`🔄 Tendencia cambió · Evalúa salir
-`
-            +`⚠️ No es señal de stop automático`
+            `⚠️ ALERTA DE TENDENCIA — ${sym}\n`
+            +`━━━━━━━━━━━━━━━━━━━━\n`
+            +`Hull16 GIRÓ BAJISTA\n`
+            +`━━━━━━━━━━━━━━━━━━━━\n`
+            +`💵 Entrada:  $${trade.entry}\n`
+            +`💰 Precio:   $${price.toFixed(2)}\n`
+            +`📊 P&L:      ${pnlNow>=0?'+':''}${pnlNow}%\n`
+            +`━━━━━━━━━━━━━━━━━━━━\n`
+            +`🎯 OPCIONES:\n`
+            +`${pnlNow>0?'1. Salir con ganancia ahora\n2. Mover stop a precio de entrada':'1. Salir y limitar pérdida\n2. Esperar si stop no tocado'}\n`
+            +`Tú decides — stop en $${trade.sl}\n`
+            +`━━━━━━━━━━━━━━━━━━━━\n`
+            +`Confirmar en TradingView antes de actuar`
           );
           // No cerrar automáticamente — solo avisar
         }
@@ -911,7 +968,7 @@ async function runScan() {
     const results = await Promise.all(batch.map(async sym => {
       try {
         const bars = await fetchBars(sym);
-        if(bars?.length>=40) return analyze(sym, bars);
+        if(bars?.closes?.length>=40||bars?.length>=40) return analyze(sym, bars);
       } catch(e) { log(`${sym} error: ${e.message}`); }
       return null;
     }));
@@ -937,9 +994,95 @@ async function runScan() {
   if(found===0) log(`Sin señales · ${WATCHLIST.length} activos analizados`);
 }
 
+// ── REPORTE HORARIO ───────────────────────────
+async function sendHourlyStatus() {
+  const session = getMarketSession();
+  if(session==='WEEKEND'||session==='CLOSED') return;
+
+  const now = Date.now();
+  // Solo enviar cada 60 minutos
+  if(now - lastHourlyMsg < 58*60*1000) return;
+  lastHourlyMsg = now;
+
+  const hora = getET().toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'});
+
+  // Top 3 de watchlist por score
+  const watchScores = [];
+  for(const u of WATCHLIST.slice(0,21)) {
+    try {
+      const bars = await fetchBars(u.sym);
+      if(bars?.closes?.length>=40||bars?.length>=40) {
+        const sig = analyze(u.sym, bars);
+        if(sig) watchScores.push({...sig, name:u.name, sector:u.sector||'tech'});
+      }
+    } catch(e){}
+    await new Promise(r=>setTimeout(r,300));
+  }
+
+  // Top 3 del scanner por score
+  const scanScores = [];
+  const scanSample = SCANNER.filter(u=>!WATCHLIST_SYMS.has(u.sym)).slice(0,20);
+  for(const u of scanSample) {
+    try {
+      const bars = await fetchBars(u.sym);
+      if(bars?.closes?.length>=40||bars?.length>=40) {
+        const sig = analyze(u.sym, bars);
+        if(sig && sig.price>=3 && sig.price<=50) {
+          scanScores.push({...sig, name:u.name, sector:u.sector||'tech'});
+        }
+      }
+    } catch(e){}
+    await new Promise(r=>setTimeout(r,300));
+  }
+
+  const top3Watch = watchScores.sort((a,b)=>b.score-a.score).slice(0,3);
+  const top3Scan  = scanScores.sort((a,b)=>b.score-a.score).slice(0,3);
+
+  const sesLabel = session==='PREMARKET'?'PRE-MARKET':session==='POSTMARKET'?'POST-MARKET':'MERCADO ABIERTO';
+
+  let msg = `🤖 AGENTE ACTIVO — ${sesLabel}\n`
+    +`━━━━━━━━━━━━━━━━━━━━\n`
+    +`✅ Funcionando sin problemas\n`
+    +`⏰ ${hora} ET · Scan #${scanCount}\n`
+    +`🌎 SPY: ${spyScore}% ${marketOK?'✅ Alcista':'⚠️ Neutral'}\n`
+    +`📈 Señales hoy: ${sigCount}\n`
+    +`━━━━━━━━━━━━━━━━━━━━\n`;
+
+  // Top 3 watchlist
+  if(top3Watch.length>0) {
+    msg += `📋 MEJORES DE TU WATCHLIST:\n`;
+    top3Watch.forEach((s,i)=>{
+      const estado = s.score>=75?'🟢':s.score>=65?'🟡':'⚪';
+      const vol = s.volRatio>0?` · Vol ${s.volRatio}x`:'';
+      msg += `${i+1}. ${estado} ${s.sym} $${s.price} · Score ${s.score}%${vol}\n`;
+    });
+    msg += `─────────────────────\n`;
+  }
+
+  // Top 3 scanner
+  if(top3Scan.length>0) {
+    msg += `🔭 MEJORES DEL RADAR:\n`;
+    top3Scan.forEach((s,i)=>{
+      const estado = s.score>=75?'🟢':s.score>=65?'🟡':'⚪';
+      msg += `${i+1}. ${estado} ${s.sym} — ${s.name}\n`
+           + `   $${s.price} · Score ${s.score}% · RSI ${s.rsiV||'─'}\n`;
+    });
+    msg += `─────────────────────\n`;
+  }
+
+  msg += `⚠️ Estas son para VIGILAR\n`
+    +`Señal de COMPRA llega por separado\n`
+    +`🤖 @Buyscanertradyng_bot`;
+
+  await sendTG(TG_GROUP, msg);
+  log(`📊 Reporte horario enviado · ${hora} ET`);
+}
+
 // ── RESUMEN AUTOMÁTICO AL CIERRE ─────────────
 let summarySentToday = '';
 let morningMsgSent   = '';
+let lastHourlyMsg    = 0; // timestamp del último mensaje horario
+let lastResults      = {}; // últimos resultados del scan para el reporte horario
 function scheduleDailySummary() {
   const et    = getET();
   const today = et.toISOString().split('T')[0];
@@ -1021,6 +1164,7 @@ async function main() {
     await runScan();           // Watchlist fija
     await runScannerSignals(); // Scanner dinámico — misma estrategia
     await runRadarTop5();      // Top5 resumen matutino
+    await sendHourlyStatus();  // Reporte horario con mejores oportunidades
     scheduleDailySummary();
   }, INTERVAL * 60 * 1000);
 }
