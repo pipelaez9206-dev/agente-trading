@@ -1,4 +1,5 @@
-// ════════════════════════════════════════════
+
+          // ════════════════════════════════════════════
 //  AGENTE TRADING — Node.js para Railway
 //  Corre 24/7 en la nube · Señales a Telegram
 // ════════════════════════════════════════════
@@ -937,12 +938,45 @@ async function runScan() {
 }
 
 // ── RESUMEN AUTOMÁTICO AL CIERRE ─────────────
+let summarySentToday = '';
+let morningMsgSent   = '';
 function scheduleDailySummary() {
-  const et      = getET();
-  const now     = et.getHours()*60 + et.getMinutes();
-  const close   = 16*60; // 4pm ET
-  const minsLeft= close - now;
-  if(minsLeft>0 && minsLeft<INTERVAL+2) {
+  const et    = getET();
+  const today = et.toISOString().split('T')[0];
+  const hour  = et.getHours();
+  const min   = et.getMinutes();
+
+  // Buenos dias — 9:25am ET (5 min antes de abrir mercado)
+  if(hour===9 && min>=25 && min<=35 && morningMsgSent!==today) {
+    morningMsgSent = today;
+    const fecha = et.toLocaleDateString('es-CO',{weekday:'long',day:'numeric',month:'long'});
+    sendTG(TG_GROUP,
+      `Buenos dias equipo! Agente activo
+`
+      +`━━━━━━━━━━━━━━━━━━━━
+`
+      +`Fecha: ${fecha}
+`
+      +`Watchlist: ${WATCHLIST.length} activos
+`
+      +`Scanner: ${SCANNER.length} empresas
+`
+      +`SPY: ${spyScore}% ${marketOK?'Mercado OK':'Mercado neutral'}
+`
+      +`━━━━━━━━━━━━━━━━━━━━
+`
+      +`Mercado abre en 5 minutos
+`
+      +`Escaneo cada ${INTERVAL} minutos
+`
+      +`Buenas operaciones!`
+    );
+    log('Buenos dias enviado al grupo');
+  }
+
+  // Resumen cierre — 4:00pm a 4:10pm ET
+  if(hour===16 && min<=10 && summarySentToday!==today) {
+    summarySentToday = today;
     sendDailySummary();
   }
 }
