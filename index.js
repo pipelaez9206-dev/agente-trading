@@ -1,5 +1,4 @@
-
-          // ════════════════════════════════════════════
+// ════════════════════════════════════════════
 //  AGENTE TRADING — Node.js para Railway
 //  Corre 24/7 en la nube · Señales a Telegram
 // ════════════════════════════════════════════
@@ -37,6 +36,7 @@ const WATCHLIST = [
   {sym:'SOFI', name:'SoFi Technologies',     sector:'tech'},
   {sym:'SMR',  name:'NuScale Power',         sector:'energy'},
   {sym:'RIVN', name:'Rivian',                sector:'tech'},
+  {sym:'COIN', name:'Coinbase Global',       sector:'tech'},
 ];
 
 // Scanner dinámico — universo amplio de empresas NO en watchlist
