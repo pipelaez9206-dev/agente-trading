@@ -333,11 +333,28 @@ function analyze(sym, bars) {
   // En extended hours solo activos de alto volumen
   if(isExtended && !isHighVol) return {...returnBase(sym,price,hullUp,hullFlip,hl,score,rsiV), isBuy:false};
 
-  const isBuy = hullFlip && hullUp
+  // ── SEÑAL TIPO 1: FLIP ──────────────────────
+  // Hull16 gira de bajista a alcista — cambio de tendencia
+  const isBuyFlip = hullFlip && hullUp
     && ema9Ok
     && score >= minScore
     && hl.bars >= minBars
     && (rsiV===null||(rsiV>=rsiMin&&rsiV<=rsiMax));
+
+  // ── SEÑAL TIPO 2: CONTINUACIÓN ──────────────
+  // Hull16 ya alcista + precio sigue el Hull + volumen confirma
+  // Requiere que Hull lleve al menos 3 horas alcista (no es flip reciente)
+  const isBuyCont = !hullFlip && hullUp
+    && hl.bars >= 3           // Hull alcista por 3+ horas
+    && hl.bars <= 8           // No demasiado tarde en la tendencia
+    && ema9Trending           // EMA9 subiendo
+    && price > (h16||price)   // Precio sobre Hull16
+    && highVolume             // Volumen alto confirma
+    && score >= 65            // Score mínimo más bajo para continuación
+    && (rsiV===null||(rsiV>=rsiMin&&rsiV<=65)); // RSI no sobreextendido
+
+  const isBuy = isBuyFlip || isBuyCont;
+  const signalType = isBuyFlip ? 'FLIP' : isBuyCont ? 'CONTINUACION' : '';
 
   // ATR estimado para stop dinámico
   const recentRange = d.slice(-10).map((v,i,a)=>i>0?Math.abs(v-a[i-1]):0).reduce((a,b)=>a+b,0)/10;
@@ -349,6 +366,7 @@ function analyze(sym, bars) {
     score, isBuy, rsiV,
     ema9Turn: ema9TurnUp,
     volRatio, highVolume,
+    signalType,
     t1: +(price*1.02).toFixed(2),
     t2: +(price*1.03).toFixed(2),
     t3: +(price*1.04).toFixed(2),
@@ -420,6 +438,11 @@ async function sendSignal(sig) {
                 : session==='POSTMARKET' ? '🌙 POST-MARKET'
                 : '📊 MERCADO ABIERTO';
 
+  // Tipo de señal
+  const tipoSenal = sig.signalType==='FLIP'
+    ? '🔄 CAMBIO DE TENDENCIA — Hull16 giró alcista'
+    : '📈 CONTINUACIÓN — Precio sigue el Hull16 alcista';
+
   // Calidad de la señal
   const calidad = sig.score>=85 ? '🔥 MUY ALTA'
                 : sig.score>=75 ? '✅ ALTA'
@@ -448,6 +471,7 @@ async function sendSignal(sig) {
     +`⭐ Calidad señal: ${calidad} (${sig.score}%)\n`
     +`⏰ ${horaMsg}\n`
     +`🌎 SPY: ${spyScore}% ${marketOK?'✅ Mercado alcista':'⚠️ Mercado neutral'}\n`
+    +`🎯 Tipo: ${tipoSenal}\n`
     +`📊 Hull16: ALCISTA ↑ · ${sig.hullBars} hora(s)\n`
     +(sig.ema9Turn?`📊 EMA9: Giró ALCISTA ↑ (señal fuerte)\n`:`📊 EMA9: Tendencia alcista\n`)
     +(sig.volRatio>0?`📦 Volumen: ${sig.volRatio}x promedio ${sig.highVolume?'✅ ALTO':'⚠️ normal'}\n`:'')
