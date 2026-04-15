@@ -14,8 +14,8 @@ const TG_FELIPE  = '6773568382';
 const INTERVAL   = 3;    // minutos entre escaneos (3 min para no perder breakouts)
 const BB_PERIOD  = 20;   // período Bollinger
 const BB_STD     = 2;    // desviaciones estándar
-const BB_WIDTH_MIN = 1.5; // BB Width mínimo para confirmar volatilidad (%)
-const VOL_MULT   = 1.5;  // volumen debe ser 1.5x el promedio
+const BB_WIDTH_MIN = 0.5; // BB Width mínimo (%)
+const VOL_MULT   = 1.3;  // volumen debe ser 1.3x el promedio
 const BLOCK_HOURS = 2;   // horas de bloqueo por señal (opciones se mueven rápido)
 
 // ── ACTIVOS ──────────────────────────────────
@@ -162,12 +162,19 @@ function analyze(sym, bars) {
   const highVola   = bb.width >= BB_WIDTH_MIN;
 
   // ── BREAKOUT ALCISTA (CALL) ──
-  // Precio rompe sobre la banda superior
-  const breakoutUp = price > bb.upper && prevP <= bbPrev.upper;
+  // Opción 1: precio acaba de romper la banda superior (vela actual)
+  const breakoutUpFresh = price > bb.upper && prevP <= bbPrev.upper;
+  // Opción 2: precio lleva 1-3 velas fuera de la banda (breakout reciente)
+  const prev2P = closes.length>3 ? closes[closes.length-3] : prevP;
+  const breakoutUpRecent = price > bb.upper && prevP > bbPrev.upper && prev2P <= bollinger(closes.slice(0,-2),BB_PERIOD,BB_STD)?.upper;
+  const breakoutUp = breakoutUpFresh || breakoutUpRecent;
 
   // ── BREAKOUT BAJISTA (PUT) ──
-  // Precio rompe bajo la banda inferior
-  const breakoutDn = price < bb.lower && prevP >= bbPrev.lower;
+  // Opción 1: precio acaba de romper la banda inferior
+  const breakoutDnFresh = price < bb.lower && prevP >= bbPrev.lower;
+  // Opción 2: breakout bajista reciente
+  const breakoutDnRecent = price < bb.lower && prevP < bbPrev.lower && prev2P >= bollinger(closes.slice(0,-2),BB_PERIOD,BB_STD)?.lower;
+  const breakoutDn = breakoutDnFresh || breakoutDnRecent;
 
   // ── SEÑAL ──
   // Necesita: breakout + volumen alto + volatilidad
