@@ -13,7 +13,7 @@ const TG_TOKEN   = '8576001297:AAH6dLApI099m7dUqe8zDaeMtK5pxbXc2t8';
 const TG_GROUP   = '-5187081924';
 const TG_FELIPE  = '6773568382';
 const INTERVAL   = 5;
-const MIN_SCORE  = 52;
+const MIN_SCORE  = 48;
 const BLOCK_HOURS= 8;
 
 // ── WATCHLIST ───────────────────────────────
@@ -264,12 +264,12 @@ async function analyzeMultiTF(sym) {
   const ema9TurnUp  = !!(ma9&&ma9p&&ma9p2 && ma9>ma9p && ma9p<=ma9p2);
   const ema9Trending= !!(ma9&&ma9p && ma9>ma9p);
 
-  // Volumen
-  const volumes   = bars1H.map(b=>b.v);
-  const volCurrent= volumes[volumes.length-1];
-  const volAvg20  = volumes.slice(-21,-1).reduce((a,b)=>a+b,0)/20 || 1;
-  const volRatio  = +(volCurrent/volAvg20).toFixed(2);
-  const highVolume= volRatio >= 1.3;
+  // Volumen — usar datos históricos de barras (no WebSocket)
+  const volumes   = bars1H.map(b=>b.v).filter(v=>v>0);
+  const volCurrent= volumes.length>0 ? volumes[volumes.length-1] : 0;
+  const volAvg20  = volumes.length>=5 ? volumes.slice(-21,-1).reduce((a,b)=>a+b,0)/Math.min(20,volumes.slice(-21,-1).length) : 1;
+  const volRatio  = volAvg20>0 ? +(volCurrent/volAvg20).toFixed(2) : 1;
+  const highVolume= volRatio >= 1.2;
 
   // 3. Barras 15M — momentum de entrada
   const bars15M = await fetchBars(sym, 'minute', 5); // últimos 5 días en 15M via Polygon aggs
@@ -365,11 +365,11 @@ async function analyzeMultiTF(sym) {
   // Señal CONTINUACIÓN — precio sigue Hull alcista
   const HIGH_VOL = ['TSLA','AMD','PLTR','SOXL','MARA','HOOD','SOFI','RIVN','ORCL','COIN'];
   const isBuyCont = !hullFlip && hullUp
-    && hl.bars >= 2 && hl.bars <= 10
+    && hl.bars >= 1 && hl.bars <= 10
     && ema9Trending
     && price > (h16||price)
-    && score >= 52
-    && (rsiV===null||(rsiV>=rsiMin&&rsiV<=72));
+    && score >= 50
+    && (rsiV===null||(rsiV>=rsiMin&&rsiV<=75));
 
   // En extended hours solo activos de alto volumen
   const isHighVol = HIGH_VOL.includes(sym);
@@ -916,3 +916,4 @@ main().catch(e=>{
   console.error('Error fatal:', e);
   process.exit(1);
 });
+
