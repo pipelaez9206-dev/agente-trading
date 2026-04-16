@@ -13,7 +13,7 @@ const TG_TOKEN   = '8576001297:AAH6dLApI099m7dUqe8zDaeMtK5pxbXc2t8';
 const TG_GROUP   = '-5187081924';
 const TG_FELIPE  = '6773568382';
 const INTERVAL   = 5;
-const MIN_SCORE  = 60;
+const MIN_SCORE  = 52;
 const BLOCK_HOURS= 8;
 
 // ── WATCHLIST ───────────────────────────────
@@ -320,23 +320,23 @@ async function analyzeMultiTF(sym) {
     if(h16D&&h16Dp) trendDaily = h16D>h16Dp ? 'UP' : 'DOWN';
   }
 
-  // Score multi-timeframe
+  // Score multi-timeframe — bonificadores, NO requisitos
   let pts=0, max=0;
   const add = (ok,w) => {max+=w; if(ok) pts+=w;};
-  // ── 1H (base) ──
-  add(hullUp,          4);  // Hull16 1H alcista
-  add(ema9TurnUp,      5);  // EMA9 giró alcista en 1H
-  add(ema9Trending,    2);  // EMA9 subiendo en 1H
-  add(!!(ma20&&ma40&&ma20>ma40), 2); // MA20>MA40 en 1H
-  add(!!(rsiV&&rsiV>=30&&rsiV<=72), 2); // RSI 1H sano
-  add(price>(h16||price), 2); // precio sobre Hull16 1H
+  // ── 1H (base — más peso) ──
+  add(hullUp,          5);  // Hull16 1H alcista
+  add(ema9TurnUp,      6);  // EMA9 giró alcista en 1H — señal fuerte
+  add(ema9Trending,    3);  // EMA9 subiendo en 1H
+  add(!!(rsiV&&rsiV>=30&&rsiV<=75), 3); // RSI 1H sano
+  add(price>(h16||price), 2); // precio sobre Hull16
   add(highVolume,      3);  // volumen 1H alto
-  // ── Diario ──
-  add(trendDaily==='UP', 3); // tendencia diaria alcista
-  // ── 15M (confirmador de entrada) ──
-  add(trend15M==='UP',  4); // Hull16 15M alcista — confirma entrada
-  add(!!(rsi15M&&rsi15M>=30&&rsi15M<=70), 2); // RSI 15M sano
-  add(vol15M_ratio>=1.3, 2); // volumen 15M alto
+  // ── 15M (confirmador) ──
+  add(trend15M==='UP',  4); // Hull16 15M alcista
+  add(!!(rsi15M&&rsi15M>=25&&rsi15M<=75), 2); // RSI 15M sano
+  add(vol15M_ratio>=1.2, 2); // volumen 15M alto
+  // ── Diario (bonificador) ──
+  add(trendDaily==='UP', 3); // tendencia diaria alcista — bonus no requisito
+  add(!!(ma20&&ma40&&ma20>ma40), 2); // MA20>MA40
   const score = max>0 ? Math.round(pts/max*100) : 50;
 
   // Stop dinámico basado en ATR
@@ -347,7 +347,7 @@ async function analyzeMultiTF(sym) {
   const session    = getMarketSession();
   const isExtended = session==='PREMARKET'||session==='POSTMARKET';
   const minScore   = isExtended ? 75 : MIN_SCORE;
-  const minBars    = isExtended ? 2  : 1;
+  const minBars    = isExtended ? 2  : 0;
   const rsiMin     = 30;
   const rsiMax     = isExtended ? 65 : 72;
 
@@ -356,26 +356,20 @@ async function analyzeMultiTF(sym) {
   const etMin = et.getHours()*60+et.getMinutes();
   const horaOptima = (etMin>=570&&etMin<=660)||(etMin>=870&&etMin<=960);
 
-  // Señal FLIP — cambio de tendencia (15M debe estar alcista o neutral)
+  // Señal FLIP — Hull16 gira alcista (condición principal)
   const isBuyFlip = hullFlip && hullUp
     && (ema9TurnUp||ema9Trending)
     && score >= minScore
-    && hl.bars >= minBars
-    && trend15M !== 'DOWN'         // 15M no debe estar bajista
     && (rsiV===null||(rsiV>=rsiMin&&rsiV<=rsiMax));
 
-  // Señal CONTINUACIÓN — precio sigue Hull alcista (confirmado en 15M)
+  // Señal CONTINUACIÓN — precio sigue Hull alcista
   const HIGH_VOL = ['TSLA','AMD','PLTR','SOXL','MARA','HOOD','SOFI','RIVN','ORCL','COIN'];
   const isBuyCont = !hullFlip && hullUp
-    && hl.bars >= 2 && hl.bars <= 12
+    && hl.bars >= 2 && hl.bars <= 10
     && ema9Trending
     && price > (h16||price)
-    && (highVolume || vol15M_ratio>=1.3)
-    && score >= 55
-    && trendDaily === 'UP'
-    && trend15M === 'UP'           // 15M debe confirmar
-    && (rsiV===null||(rsiV>=rsiMin&&rsiV<=70))
-    && (rsi15M===null||(rsi15M>=30&&rsi15M<=72));
+    && score >= 52
+    && (rsiV===null||(rsiV>=rsiMin&&rsiV<=72));
 
   // En extended hours solo activos de alto volumen
   const isHighVol = HIGH_VOL.includes(sym);
