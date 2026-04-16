@@ -271,7 +271,46 @@ async function analyzeMultiTF(sym) {
   const volRatio  = +(volCurrent/volAvg20).toFixed(2);
   const highVolume= volRatio >= 1.3;
 
-  // 3. Tendencia diaria (filtro mayor)
+  // 3. Barras 15M — momentum de entrada
+  const bars15M = await fetchBars(sym, 'minute', 5); // últimos 5 días en 15M via Polygon aggs
+  let trend15M   = 'NEUTRAL';
+  let ema9_15M   = null;
+  let rsi15M     = null;
+  let vol15M_ratio = 0;
+  let price15M   = null;
+
+  // Fetch 15M separado
+  try {
+    const to15   = new Date();
+    const from15 = new Date(to15 - 5*864e5);
+    const fmt    = d => d.toISOString().split('T')[0];
+    const url15  = `https://api.polygon.io/v2/aggs/ticker/${sym}/range/15/minute/${fmt(from15)}/${fmt(to15)}?adjusted=true&sort=asc&limit=300&apiKey=${POLY}`;
+    const r15    = await fetchT(url15, 7000);
+    const d15    = await r15.json();
+    if(d15?.results?.length>=20) {
+      const bars = d15.results.map(b=>({c:+b.c.toFixed(4),h:+b.h.toFixed(4),l:+b.l.toFixed(4),v:b.v||0}));
+      const cl15 = bars.map(b=>b.c);
+      const vl15 = bars.map(b=>b.v);
+      const h16_15  = hma16(cl15);
+      const h16_15p = hma16(cl15.slice(0,-1));
+      ema9_15M  = ema(cl15, 9);
+      const ema9_15p= ema(cl15.slice(0,-1), 9);
+      rsi15M    = rsi14(cl15);
+      price15M  = getRTPrice(sym) || cl15[cl15.length-1];
+
+      // Tendencia 15M
+      if(h16_15&&h16_15p) trend15M = h16_15>h16_15p ? 'UP' : 'DOWN';
+
+      // Volumen 15M
+      const vol15Cur = vl15[vl15.length-1];
+      const vol15Avg = vl15.slice(-21,-1).reduce((a,b)=>a+b,0)/20||1;
+      vol15M_ratio   = +(vol15Cur/vol15Avg).toFixed(2);
+
+      log(`${sym} 15M: $${price15M?.toFixed(2)} Hull:${trend15M} EMA9:${ema9_15M?.toFixed(2)} RSI:${rsi15M} Vol:${vol15M_ratio}x`);
+    }
+  } catch(e) { log(`${sym} 15M error: ${e.message}`); }
+
+  // 4. Tendencia diaria (filtro mayor)
   const bars1D = await fetchBars(sym, 'day', 60);
   let trendDaily = 'NEUTRAL';
   if(bars1D&&bars1D.length>=20) {
@@ -281,17 +320,23 @@ async function analyzeMultiTF(sym) {
     if(h16D&&h16Dp) trendDaily = h16D>h16Dp ? 'UP' : 'DOWN';
   }
 
-  // Score
+  // Score multi-timeframe
   let pts=0, max=0;
   const add = (ok,w) => {max+=w; if(ok) pts+=w;};
+  // ── 1H (base) ──
   add(hullUp,          4);  // Hull16 1H alcista
-  add(ema9TurnUp,      5);  // EMA9 giró alcista
-  add(ema9Trending,    2);  // EMA9 subiendo
-  add(!!(ma20&&ma40&&ma20>ma40), 2); // MA20>MA40
-  add(!!(rsiV&&rsiV>=30&&rsiV<=72), 2); // RSI sano
-  add(price>(h16||price), 2); // precio sobre Hull16
-  add(highVolume,      3);  // volumen alto
+  add(ema9TurnUp,      5);  // EMA9 giró alcista en 1H
+  add(ema9Trending,    2);  // EMA9 subiendo en 1H
+  add(!!(ma20&&ma40&&ma20>ma40), 2); // MA20>MA40 en 1H
+  add(!!(rsiV&&rsiV>=30&&rsiV<=72), 2); // RSI 1H sano
+  add(price>(h16||price), 2); // precio sobre Hull16 1H
+  add(highVolume,      3);  // volumen 1H alto
+  // ── Diario ──
   add(trendDaily==='UP', 3); // tendencia diaria alcista
+  // ── 15M (confirmador de entrada) ──
+  add(trend15M==='UP',  4); // Hull16 15M alcista — confirma entrada
+  add(!!(rsi15M&&rsi15M>=30&&rsi15M<=70), 2); // RSI 15M sano
+  add(vol15M_ratio>=1.3, 2); // volumen 15M alto
   const score = max>0 ? Math.round(pts/max*100) : 50;
 
   // Stop dinámico basado en ATR
@@ -311,23 +356,26 @@ async function analyzeMultiTF(sym) {
   const etMin = et.getHours()*60+et.getMinutes();
   const horaOptima = (etMin>=570&&etMin<=660)||(etMin>=870&&etMin<=960);
 
-  // Señal FLIP — cambio de tendencia
+  // Señal FLIP — cambio de tendencia (15M debe estar alcista o neutral)
   const isBuyFlip = hullFlip && hullUp
     && (ema9TurnUp||ema9Trending)
     && score >= minScore
     && hl.bars >= minBars
+    && trend15M !== 'DOWN'         // 15M no debe estar bajista
     && (rsiV===null||(rsiV>=rsiMin&&rsiV<=rsiMax));
 
-  // Señal CONTINUACIÓN — precio sigue Hull alcista
+  // Señal CONTINUACIÓN — precio sigue Hull alcista (confirmado en 15M)
   const HIGH_VOL = ['TSLA','AMD','PLTR','SOXL','MARA','HOOD','SOFI','RIVN','ORCL','COIN'];
   const isBuyCont = !hullFlip && hullUp
     && hl.bars >= 2 && hl.bars <= 12
     && ema9Trending
     && price > (h16||price)
-    && highVolume
+    && (highVolume || vol15M_ratio>=1.3)
     && score >= 55
     && trendDaily === 'UP'
-    && (rsiV===null||(rsiV>=rsiMin&&rsiV<=70));
+    && trend15M === 'UP'           // 15M debe confirmar
+    && (rsiV===null||(rsiV>=rsiMin&&rsiV<=70))
+    && (rsi15M===null||(rsi15M>=30&&rsi15M<=72));
 
   // En extended hours solo activos de alto volumen
   const isHighVol = HIGH_VOL.includes(sym);
@@ -342,8 +390,8 @@ async function analyzeMultiTF(sym) {
     score, isBuy, rsiV, atrV,
     ema9Turn: ema9TurnUp,
     volRatio, highVolume,
-    trendDaily, horaOptima,
-    signalType,
+    trendDaily, trend15M, rsi15M, vol15M_ratio,
+    horaOptima, signalType,
     rtPrice: !!rtPrice,
     t1: +(price*1.02).toFixed(2),
     t2: +(price*1.03).toFixed(2),
@@ -417,10 +465,11 @@ async function sendSignal(sig) {
     +`${sig.horaOptima?'✅ Hora óptima de entrada':'⚠️ Hora no óptima · mayor cautela'}\n`
     +`🌎 SPY: ${spyScore}% ${marketOK?'✅ Alcista':'⚠️ Neutral'}\n`
     +`📊 Tendencia diaria: ${sig.trendDaily==='UP'?'🟢 ALCISTA':'🔴 BAJISTA'}\n`
-    +`📊 Hull16: ALCISTA ↑ · ${sig.hullBars} hora(s)\n`
-    +(sig.ema9Turn?`📊 EMA9: Giró ALCISTA ↑ (señal fuerte)\n`:`📊 EMA9: Tendencia alcista\n`)
-    +`📦 Volumen: ${sig.volRatio}x ${sig.highVolume?'✅ ALTO':'⚠️ normal'}\n`
-    +`📉 RSI: ${sig.rsiV||'─'}\n`
+    +`📊 1H Hull16: ALCISTA ↑ · ${sig.hullBars} hora(s)\n`
+    +(sig.ema9Turn?`📊 1H EMA9: Giró ALCISTA ↑\n`:`📊 1H EMA9: Tendencia alcista\n`)
+    +`📊 15M Hull16: ${sig.trend15M==='UP'?'🟢 ALCISTA ↑':'⚠️ '+sig.trend15M}\n`
+    +`📉 1H RSI: ${sig.rsiV||'─'} · 15M RSI: ${sig.rsi15M||'─'}\n`
+    +`📦 Vol 1H: ${sig.volRatio}x · 15M: ${sig.vol15M_ratio}x\n`
     +`━━━━━━━━━━━━━━━━━━━━\n`
     +`🎯 PLAN DE TRADING:\n`
     +`🟢 ENTRAR: $${sig.price}\n`
