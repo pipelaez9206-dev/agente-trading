@@ -10,7 +10,7 @@ const TG_TOKEN   = '8576001297:AAH6dLApI099m7dUqe8zDaeMtK5pxbXc2t8';
 const TG_GROUP   = '-5187081924';   // Grupo Trading Señales
 const TG_FELIPE  = '6773568382';    // Chat personal Felipe
 const INTERVAL   = 5;              // minutos entre escaneos
-const MIN_SCORE  = 70;             // confianza mínima %
+const MIN_SCORE  = 60;             // confianza mínima %
 const BLOCK_HOURS= 8;              // horas de bloqueo por símbolo
 
 // ── WATCHLIST ───────────────────────────────
@@ -318,10 +318,10 @@ function analyze(sym, bars) {
   // Extended hours: más estricto — score 80%, solo activos de alto volumen
   const HIGH_VOL   = ['TSLA','AMD','PLTR','SOXL','MARA','HOOD','SOFI','RIVN','ORCL'];
   const isHighVol  = HIGH_VOL.includes(sym);
-  const minScore   = isExtended ? 80 : MIN_SCORE; // 80% en extended, 70% en regular
-  const minBars    = isExtended ? 2 : 2;           // 2 barras siempre
-  const rsiMin     = isExtended ? 40 : 35;
-  const rsiMax     = isExtended ? 65 : 68;         // RSI más estricto en extended
+  const minScore   = isExtended ? 75 : MIN_SCORE; // 75% en extended, 60% en regular
+  const minBars    = isExtended ? 2 : 1;           // 1 barra en regular, 2 en extended
+  const rsiMin     = isExtended ? 40 : 30;         // RSI más amplio en regular
+  const rsiMax     = isExtended ? 65 : 72;         // RSI más amplio en regular
 
   // BUY requiere:
   // 1. Hull16 flipea a alcista ↑
@@ -345,13 +345,12 @@ function analyze(sym, bars) {
   // Hull16 ya alcista + precio sigue el Hull + volumen confirma
   // Requiere que Hull lleve al menos 3 horas alcista (no es flip reciente)
   const isBuyCont = !hullFlip && hullUp
-    && hl.bars >= 3           // Hull alcista por 3+ horas
-    && hl.bars <= 8           // No demasiado tarde en la tendencia
+    && hl.bars >= 2           // Hull alcista por 2+ horas
+    && hl.bars <= 12          // No demasiado tarde
     && ema9Trending           // EMA9 subiendo
     && price > (h16||price)   // Precio sobre Hull16
-    && highVolume             // Volumen alto confirma
-    && score >= 65            // Score mínimo más bajo para continuación
-    && (rsiV===null||(rsiV>=rsiMin&&rsiV<=65)); // RSI no sobreextendido
+    && score >= 55            // Score mínimo para continuación
+    && (rsiV===null||(rsiV>=30&&rsiV<=70)); // RSI no sobreextendido
 
   const isBuy = isBuyFlip || isBuyCont;
   const signalType = isBuyFlip ? 'FLIP' : isBuyCont ? 'CONTINUACION' : '';
@@ -998,6 +997,7 @@ async function runScan() {
     }));
 
     for(const sig of results) {
+      if(sig) log(`📊 ${sig.sym}: score ${sig.score}% · hull ${sig.hullUp?'↑':'↓'} · flip:${sig.hullFlip} · bars:${sig.hullBars} · rsi:${sig.rsiV} · vol:${sig.volRatio}x · buy:${sig.isBuy} (${sig.signalType||'─'})`);
       if(!sig || !sig.isBuy) continue;
 
       // Bloqueo por símbolo (1 señal por día)
