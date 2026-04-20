@@ -13,7 +13,7 @@ const TG_TOKEN   = '8576001297:AAH6dLApI099m7dUqe8zDaeMtK5pxbXc2t8';
 const TG_GROUP   = '-5187081924';
 const TG_FELIPE  = '6773568382';
 const INTERVAL   = 5;
-const MIN_SCORE  = 48;
+const MIN_SCORE  = 40;
 const BLOCK_HOURS= 8;
 
 // ── WATCHLIST ───────────────────────────────
@@ -356,19 +356,19 @@ async function analyzeMultiTF(sym) {
   const etMin = et.getHours()*60+et.getMinutes();
   const horaOptima = (etMin>=570&&etMin<=660)||(etMin>=870&&etMin<=960);
 
-  // Señal FLIP — Hull16 gira alcista (condición principal)
+  // Señal FLIP — Hull16 gira alcista
   const isBuyFlip = hullFlip && hullUp
     && (ema9TurnUp||ema9Trending)
-    && score >= minScore
+    && score >= 40
     && (rsiV===null||(rsiV>=rsiMin&&rsiV<=rsiMax));
 
   // Señal CONTINUACIÓN — precio sigue Hull alcista
   const HIGH_VOL = ['TSLA','AMD','PLTR','SOXL','MARA','HOOD','SOFI','RIVN','ORCL','COIN'];
   const isBuyCont = !hullFlip && hullUp
-    && hl.bars >= 1 && hl.bars <= 10
+    && hl.bars >= 1
     && ema9Trending
     && price > (h16||price)
-    && score >= 50
+    && score >= 48
     && (rsiV===null||(rsiV>=rsiMin&&rsiV<=75));
 
   // En extended hours solo activos de alto volumen
@@ -846,6 +846,17 @@ function scheduleDailySummary() {
   const hour  = et.getHours();
   const min   = et.getMinutes();
 
+  // Reset Hull Lock bars diario al abrir mercado
+  if(hour===9&&min===30) {
+    Object.keys(hullLock).forEach(sym => {
+      if(hullLock[sym].bars > 12) {
+        hullLock[sym].bars = 0;
+        hullLock[sym].flipTime = Date.now();
+      }
+    });
+    log('🔄 Hull Lock reseteado para el nuevo día');
+  }
+
   // Buenos días 9:25am ET
   if(hour===9&&min>=25&&min<=35&&morningMsgSent!==today) {
     morningMsgSent = today;
@@ -916,4 +927,3 @@ main().catch(e=>{
   console.error('Error fatal:', e);
   process.exit(1);
 });
-
