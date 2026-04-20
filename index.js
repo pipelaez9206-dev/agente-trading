@@ -39,6 +39,12 @@ const WATCHLIST = [
   {sym:'SMR',  name:'NuScale Power',       sector:'energy'},
   {sym:'RIVN', name:'Rivian',              sector:'tech'},
   {sym:'COIN', name:'Coinbase Global',     sector:'tech'},
+  {sym:'TSLZ', name:'Tesla Inverse 2x',    sector:'tech'},
+  {sym:'CONI', name:'Coinbase Inverse',     sector:'tech'},
+  {sym:'PLTD', name:'Palantir Inverse',     sector:'tech'},
+  {sym:'SOXS', name:'Semi Bear 3x ETF',     sector:'semi'},
+  {sym:'MUD',  name:'MUD ETF',              sector:'tech'},
+  {sym:'AMDD', name:'AMD Inverse 2x',       sector:'semi'},
 ];
 
 const SCANNER = [
