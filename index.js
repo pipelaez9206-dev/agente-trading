@@ -10,7 +10,7 @@ const WebSocket = require('ws');
 // ── CONFIG ──────────────────────────────────
 const POLY       = 'uFofGpATkTeoMKxESD4EDlHU3reG_TzX';
 const TG_TOKEN   = '8576001297:AAH6dLApI099m7dUqe8zDaeMtK5pxbXc2t8';
-const TG_GROUP   = '-5187081924';
+const TG_GROUP   = '-1003987823131';  // Grupo Bot trading
 const TG_FELIPE  = '6773568382';
 const INTERVAL   = 5;
 const MIN_SCORE  = 40;
