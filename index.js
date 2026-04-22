@@ -13,7 +13,7 @@ const TG_TOKEN   = '8576001297:AAH6dLApI099m7dUqe8zDaeMtK5pxbXc2t8';
 const TG_GROUP   = '-1003987823131';  // Grupo Bot trading
 const TG_FELIPE  = '6773568382';
 const INTERVAL   = 5;
-const MIN_SCORE  = 40;
+const MIN_SCORE  = 55;
 const BLOCK_HOURS= 8;
 
 // ── WATCHLIST ───────────────────────────────
@@ -81,6 +81,7 @@ let top5Sent      = '';
 let summarySentToday = '';
 let morningMsgSent   = '';
 let lastHourlyMsg    = 0;
+let hullAlerted      = {}; // cooldown alertas Hull16 bajista
 
 // Precios en tiempo real via WebSocket
 let rtPrices = {}; // {SYM: {price, volume, time}}
@@ -365,7 +366,7 @@ async function analyzeMultiTF(sym) {
   // Señal FLIP — Hull16 gira alcista
   const isBuyFlip = hullFlip && hullUp
     && (ema9TurnUp||ema9Trending)
-    && score >= 40
+    && score >= 55
     && (rsiV===null||(rsiV>=rsiMin&&rsiV<=rsiMax));
 
   // Señal CONTINUACIÓN — precio sigue Hull alcista
@@ -374,7 +375,7 @@ async function analyzeMultiTF(sym) {
     && hl.bars >= 1
     && ema9Trending
     && price > (h16||price)
-    && score >= 48
+    && score >= 58
     && (rsiV===null||(rsiV>=rsiMin&&rsiV<=75));
 
   // En extended hours solo activos de alto volumen
@@ -506,6 +507,9 @@ async function sendSignal(sig) {
 async function checkExits() {
   const openSyms = Object.keys(openTrades);
   if(!openSyms.length) return;
+  // Fuera de horario extendido no monitorear salidas
+  const session = getMarketSession();
+  if(session==='CLOSED'||session==='WEEKEND') return;
   log(`👀 Monitoreando: ${openSyms.join(', ')}`);
 
   for(const sym of openSyms) {
@@ -592,13 +596,15 @@ async function checkExits() {
         continue;
       }
 
-      // Hull16 gira bajista
+      // Hull16 gira bajista — solo alertar 1 vez por hora por activo
       const bars1H = await fetchBars(sym, 'hour', 10);
       if(bars1H&&bars1H.length>=20 && trade.bars>=2) {
         const cl  = bars1H.map(b=>b.c);
         const h16 = hma16(cl);
         const h16p= hma16(cl.slice(0,-1));
-        if(h16&&h16p&&h16<h16p) {
+        const hullAlertKey = `hull_${sym}`;
+        const hullAlertOk  = !hullAlerted[hullAlertKey] || (Date.now()-hullAlerted[hullAlertKey]) > 60*60*1000;
+        if(h16&&h16p&&h16<h16p && hullAlertOk) {
           await sendTG(TG_GROUP,
             `⚠️ ALERTA DE TENDENCIA — ${sym}\n`
             +`━━━━━━━━━━━━━━━━━━━━\n`
