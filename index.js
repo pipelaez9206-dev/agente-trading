@@ -6,7 +6,7 @@ const fetch = require('node-fetch');
 
 const POLY_KEY    = 'uFofGpATkTeoMKxESD4EDlHU3reG_TzX';
 const TG_TOKEN    = '8576001297:AAH6dLApI099m7dUqe8zDaeMtK5pxbXc2t8';
-const TG_GROUP    = '-5187081924';
+const TG_GROUP    = '-1003987823131';
 const TG_FELIPE   = '6773568382';
 const INTERVAL    = 5;
 const MIN_SCORE   = 70;
@@ -215,25 +215,24 @@ async function checkSPY() {
   log('Verificando SPY...');
   try {
     var bars=await fetchBars('SPY',1,'day',60);
-    if(!bars||bars.length<50) {
+    if(!bars||bars.length<30) {
       log('SPY: datos insuficientes ('+( bars?bars.length:0)+' barras) - usando NEUTRAL');
       spyStatus='NEUTRAL'; marketOK=true; spyScore=50; return;
     }
     var closes=bars.map(function(b){return b.c;});
+    // Usa MA20 y MA40 en lugar de MA50 para funcionar con menos barras
     var ma20=sma(closes,20);
-    var ma50=sma(closes,50);
+    var ma40=closes.length>=40?sma(closes,40):null;
     var rsi=rsiCalc(closes,14);
     var last=closes[closes.length-1];
     var prev5=closes[closes.length-6]||last;
     var chg5=(last-prev5)/prev5*100;
-    if(last>ma20&&ma20>ma50&&rsi>45&&chg5>-2.5){
-      spyStatus='BULL'; marketOK=true; spyScore=100;
-    } else if((last<ma20&&rsi<50)||chg5<-2.5){
-      spyStatus='BEAR'; marketOK=false; spyScore=0;
-    } else {
-      spyStatus='NEUTRAL'; marketOK=true; spyScore=50;
-    }
-    log('SPY $'+last.toFixed(2)+' -> '+spyStatus+' | MA20:$'+ma20.toFixed(2)+' MA50:$'+ma50.toFixed(2)+' RSI:'+rsi+' 5d:'+chg5.toFixed(1)+'%');
+    var bull=last>ma20&&(!ma40||ma20>ma40)&&rsi>45&&chg5>-2.5;
+    var bear=(last<ma20&&rsi<50)||chg5<-2.5;
+    if(bull){spyStatus='BULL';marketOK=true;spyScore=100;}
+    else if(bear){spyStatus='BEAR';marketOK=false;spyScore=0;}
+    else{spyStatus='NEUTRAL';marketOK=true;spyScore=50;}
+    log('SPY $'+last.toFixed(2)+' -> '+spyStatus+' | MA20:$'+ma20.toFixed(2)+(ma40?' MA40:$'+ma40.toFixed(2):'')+' RSI:'+rsi+' 5d:'+chg5.toFixed(1)+'%');
   } catch(e) {
     log('SPY ERROR: '+e.message+' - usando NEUTRAL');
     spyStatus='NEUTRAL'; marketOK=true; spyScore=50;
