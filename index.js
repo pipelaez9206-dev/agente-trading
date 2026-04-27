@@ -9,7 +9,7 @@ const TG_TOKEN    = '8576001297:AAH6dLApI099m7dUqe8zDaeMtK5pxbXc2t8';
 const TG_GROUP    = '-1003987823131';
 const TG_FELIPE   = '6773568382';
 const INTERVAL    = 5;
-const MIN_SCORE   = 70;
+const MIN_SCORE   = 62;
 const BLOCK_HOURS = 8;
 
 const WATCHLIST = [
@@ -273,14 +273,16 @@ async function analyze(sym,bars) {
   if(hullBull)              score+=30;
   if(stackBull)             score+=15;
   if(price>e16&&d16>=0.3)   score+=10;
-  if(tc.ok)                 score+=10;
-  if(rsi>=38&&rsi<=65)      score+=10;
-  if(vol>=avgVol*1.15)      score+=8;
-  if(bv.ok)                 score+=7;
-  if(macdR&&macdR.bullish)  score+=5;
-  if(price>ma20)            score+=3;
-  if(ma40&&ma20>ma40)       score+=2;
-  var keysOk=hullBull&&stackBull&&price>e16&&d16>=0.3&&tc.ok&&rsi>=38&&rsi<=65&&vol>=avgVol*1.15&&bv.ok&&im.ok&&se.ok&&ir.ok&&!sr.nearResistance;
+  if(tc.ok)                 score+=8;
+  if(rsi>=38&&rsi<=65)      score+=8;
+  if(vol>=avgVol*1.15)      score+=7;
+  if(bv.ok)                 score+=6;
+  if(macdR&&macdR.bullish)  score+=6;
+  if(price>ma20)            score+=5;
+  if(ma40&&ma20>ma40)       score+=3;
+  if(chg>0)                 score+=2;
+  // CLAVES — condiciones mínimas obligatorias
+  var keysOk=hullBull&&stackBull&&price>e16&&d16>=0.3&&rsi>=35&&rsi<=68&&vol>=avgVol*1.1&&im.ok&&se.ok&&ir.ok&&!sr.nearResistance;
   var isBuy=keysOk&&score>=MIN_SCORE;
   var volDay=im.pct?Math.abs(im.pct):0;
   var stopMult=(spyStatus==='NEUTRAL'||volDay>2)?0.7:1.0;
@@ -382,6 +384,7 @@ async function runScan() {
   if(spyStatus==='BEAR'){log('SPY BEAR - bloqueado'); return;}
   var minScore=(sess.isPre||sess.isPost)?MIN_SCORE+10:MIN_SCORE;
   var found=0;
+  var totalAnalyzed=0, totalBuy=0, totalBlocked=0;
   for(var i=0;i<WATCHLIST.length;i+=3){
     var batch=WATCHLIST.slice(i,i+3);
     var results=await Promise.all(batch.map(async function(w){
@@ -394,11 +397,15 @@ async function runScan() {
     for(var k=0;k<results.length;k++){
       var sig=results[k];
       if(!sig) continue;
+      totalAnalyzed++;
+      // Log de diagnóstico para cada activo analizado
+      if(sig.score>=50) log(sig.sym+' $'+sig.price+' Score:'+sig.score+' Hull:'+(sig.hullBull?'UP':'DN')+' RSI:'+sig.rsi+' Vol:'+(sig.avgVol>0?(sig.vol/sig.avgVol*100).toFixed(0)+'%':'--')+' Buy:'+sig.isBuy);
       var earn=await checkEarnings(sig.sym);
-      if(earn&&earn.danger){log('Bloqueado earnings: '+sig.sym+' en '+earn.daysAway+'d');continue;}
-      if(!sig.isBuy||sig.score<minScore) continue;
+      if(earn&&earn.danger){log('Bloqueado earnings: '+sig.sym);totalBlocked++;continue;}
+      if(!sig.isBuy||sig.score<minScore){continue;}
+      totalBuy++;
       var key=sig.sym+'_'+new Date().toISOString().split('T')[0];
-      if(alerted[key]) continue;
+      if(alerted[key]){log(sig.sym+' ya alertado hoy');continue;}
       alerted[key]=true;
       setTimeout(function(k){return function(){delete alerted[k];};}(key),BLOCK_HOURS*3600000);
       log('SEÑAL: '+sig.sym+' $'+sig.price+' Score:'+sig.score);
@@ -407,7 +414,7 @@ async function runScan() {
     }
     await new Promise(function(r){setTimeout(r,500);});
   }
-  if(found===0) log('Sin señales · '+WATCHLIST.length+' activos');
+  if(found===0) log('Sin señales | Analizados:'+totalAnalyzed+' Bloqueados:'+totalBlocked+' Candidatos:'+totalBuy+' score>='+minScore);
   var et=getET(),m=et.getHours()*60+et.getMinutes();
   if(sess.isOpen&&m>=955&&m<=965) await sendDailySummary();
 }
