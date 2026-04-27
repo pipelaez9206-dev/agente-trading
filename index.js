@@ -76,17 +76,18 @@ async function sendTG(chatId, text) {
 // POLYGON
 // ════════════════════════════════════════════════════════
 async function fetchBars(sym, mult, span, days) {
-  mult = mult||1; span = span||'hour'; days = days||22;
+  mult = mult||1; span = span||'hour'; days = days||30;
   const to   = new Date();
-  const from = new Date(to); from.setDate(from.getDate()-days);
-  const toS   = to.toISOString().split('T')[0];
-  const fromS = from.toISOString().split('T')[0];
-  const url   = 'https://api.polygon.io/v2/aggs/ticker/'+sym+'/range/'+mult+'/'+span+'/'+fromS+'/'+toS+'?adjusted=true&sort=asc&limit=200&apiKey='+POLY_KEY;
+  const from = new Date(to); from.setDate(from.getDate()-(days+5)); // extra días para compensar fines de semana
+  // Formato timestamp en milisegundos para Polygon
+  const toTs   = to.getTime();
+  const fromTs = from.getTime();
+  const url = 'https://api.polygon.io/v2/aggs/ticker/'+sym+'/range/'+mult+'/'+span+'/'+fromTs+'/'+toTs+'?adjusted=true&sort=asc&limit=300&apiKey='+POLY_KEY;
   try {
     const res = await fetch(url);
     const j   = await res.json();
     if(!j.results||j.results.length===0) {
-      log('fetchBars '+sym+' VACIO status='+j.status+' count='+j.resultsCount);
+      log('fetchBars '+sym+' VACIO status='+j.status+' url='+url.substring(0,80));
       return [];
     }
     return j.results;
