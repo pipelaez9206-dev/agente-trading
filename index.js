@@ -243,10 +243,14 @@ async function checkSPY() {
 // ANÁLISIS TÉCNICO
 // ════════════════════════════════════════════════════════
 async function analyze(sym,bars) {
-  if(!bars||bars.length<40) return null;
+  if(!bars||bars.length<20) {
+    log(sym+' skip: barras='+(bars?bars.length:0));
+    return null;
+  }
   var closes=bars.map(function(b){return b.c;});
   var price=closes[closes.length-1];
   var prev=closes[closes.length-2]||price;
+  var chg=(price-prev)/prev*100;
   var vol=bars[bars.length-1].v;
   var avgVol=bars.slice(-20).reduce(function(a,b){return a+b.v;},0)/20;
   var atrV=atrCalc(bars,14)||price*0.004;
@@ -256,12 +260,15 @@ async function analyze(sym,bars) {
   var e9=ema(closes,9);
   var e16=ema(closes,16);
   var ma20=sma(closes,20);
-  var ma40=sma(closes,40);
+  var ma40=closes.length>=40?sma(closes,40):null;
   var rsi=rsiCalc(closes,14);
   var macdR=macdCalc(closes);
   var sr=getSR(bars,price);
-  if(!hull||!e9||!e16||!ma20) return null;
-  var hullBull=hull>(hullP||hull-1);
+  if(!e9||!e16||!ma20) {
+    log(sym+' skip: e9='+(e9?'ok':'null')+' e16='+(e16?'ok':'null')+' hull='+(hull?'ok':'null')+' bars='+bars.length);
+    return null;
+  }
+  var hullBull=hull?hull>(hullP||hull-1):e9>e16; // fallback si hull no hay datos
   var stackBull=e9>e16&&e16>ma20;
   var d16=(price-e16)/e16*100;
   var bv=chkBrkVol(bars);
@@ -281,7 +288,7 @@ async function analyze(sym,bars) {
   if(price>ma20)            score+=5;
   if(ma40&&ma20>ma40)       score+=3;
   if(chg>0)                 score+=2;
-  // CLAVES — condiciones mínimas obligatorias
+  // CLAVES — condiciones minimas obligatorias
   var keysOk=hullBull&&stackBull&&price>e16&&d16>=0.3&&rsi>=35&&rsi<=68&&vol>=avgVol*1.1&&im.ok&&se.ok&&ir.ok&&!sr.nearResistance;
   var isBuy=keysOk&&score>=MIN_SCORE;
   var volDay=im.pct?Math.abs(im.pct):0;
