@@ -180,7 +180,8 @@ function analyze(sym, data) {
   const stackBull= e9>e16&&e16>ma20;
   const d16      = (price-e16)/e16*100;
   const chg      = (price-prev)/prev*100;
-  const volOk    = avgVol>0&&vol>=avgVol*1.1;
+  const sess2   = getSession();
+  const volOk   = sess2.isOpen ? (avgVol>0&&vol>=avgVol*1.1) : true; // en pre/post no filtra volumen
 
   // Score
   let score=0;
@@ -188,12 +189,12 @@ function analyze(sym, data) {
   if(stackBull)           score+=20;
   if(price>e16&&d16>=0.2) score+=12;
   if(r&&r>=35&&r<=68)     score+=12;
-  if(volOk)               score+=10;
+  if(sess2.isOpen&&volOk) score+=10; // volumen solo cuenta en horario regular
   if(m&&m.bullish)        score+=8;
   if(price>ma20)          score+=5;
   if(ma40&&ma20>ma40)     score+=3;
 
-  // Condiciones clave mínimas
+  // Condiciones clave — volumen solo requerido en mercado abierto
   const ok = hullUp && stackBull && price>e16 && d16>=0.2 && r && r>=35 && r<=68 && volOk;
   const stopMult = spyStatus==='NEUTRAL'?0.75:1.0;
 
@@ -268,7 +269,7 @@ async function runScan() {
   if(scanCount%3===1) await checkSPY();
   if(spyStatus==='BEAR'){log('SPY BEAR - bloqueado');return;}
 
-  const minScore=sess.isPre||sess.isPost ? MIN_SCORE+8 : MIN_SCORE;
+  const minScore = MIN_SCORE; // mismo score en todos los horarios
   let found=0, analyzed=0, candidate=0;
 
   for(let i=0;i<WATCHLIST.length;i+=4){
@@ -290,7 +291,6 @@ async function runScan() {
       analyzed++;
       if(!sig.isBuy||sig.score<minScore) continue;
       candidate++;
-      const key=sym+'_'+new Date().toISOString().split('T')[0];
       const sym=sig.sym;
       const k=sym+'_'+new Date().toISOString().split('T')[0];
       if(alerted[k]) continue;
