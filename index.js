@@ -82,10 +82,18 @@ async function fetchBars(sym, mult, span, days) {
   const toS   = to.toISOString().split('T')[0];
   const fromS = from.toISOString().split('T')[0];
   const url   = 'https://api.polygon.io/v2/aggs/ticker/'+sym+'/range/'+mult+'/'+span+'/'+fromS+'/'+toS+'?adjusted=true&sort=asc&limit=200&apiKey='+POLY_KEY;
-  const res   = await fetch(url);
-  const j     = await res.json();
-  if(j.resultsCount===0||!j.results) return [];
-  return j.results;
+  try {
+    const res = await fetch(url);
+    const j   = await res.json();
+    if(!j.results||j.results.length===0) {
+      log('fetchBars '+sym+' VACIO status='+j.status+' count='+j.resultsCount);
+      return [];
+    }
+    return j.results;
+  } catch(e) {
+    log('fetchBars '+sym+' ERROR: '+e.message);
+    return [];
+  }
 }
 
 // ════════════════════════════════════════════════════════
@@ -397,7 +405,9 @@ async function runScan() {
     var results=await Promise.all(batch.map(async function(w){
       try{
         var bars=await fetchBars(w.sym,1,'hour',22);
-        if(bars&&bars.length>=30) return analyze(w.sym,bars);
+        log(w.sym+' barras:'+bars.length);
+        if(bars&&bars.length>=20) return analyze(w.sym,bars);
+        return null;
       }catch(e){log(w.sym+' err: '+e.message);}
       return null;
     }));
