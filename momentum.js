@@ -17,7 +17,6 @@
 
 const https = require('https');
 const fs = require('fs');
-const express = require('express');
 
 // ============================================================
 // CONFIGURACIÓN
@@ -562,31 +561,38 @@ async function scanCycle() {
 }
 
 // ============================================================
-// SERVIDOR EXPRESS (health check para Railway)
+// SERVIDOR HTTP (health check para Railway) — sin dependencias
 // ============================================================
 
-const app = express();
+const http = require('http');
 
-app.get('/', (req, res) => {
-  res.json({
-    status: 'running',
-    bot: 'Momentum Radar',
-    market_open: isMarketOpen(),
-    universe_curated: Object.values(CURATED_UNIVERSE).flat().length,
-    alert_states: Object.keys(alertState).length,
-    next_scan_min: SCAN_INTERVAL_MIN
-  });
+const server = http.createServer((req, res) => {
+  res.setHeader('Content-Type', 'application/json');
+
+  if (req.url === '/' || req.url === '/health') {
+    res.writeHead(200);
+    res.end(JSON.stringify({
+      status: 'running',
+      bot: 'Momentum Radar',
+      market_open: isMarketOpen(),
+      universe_curated: Object.values(CURATED_UNIVERSE).flat().length,
+      alert_states: Object.keys(alertState).length,
+      next_scan_min: SCAN_INTERVAL_MIN
+    }));
+  } else if (req.url === '/state') {
+    res.writeHead(200);
+    res.end(JSON.stringify(alertState));
+  } else if (req.url === '/scan') {
+    res.writeHead(200);
+    res.end(JSON.stringify({ triggered: true }));
+    scanCycle();
+  } else {
+    res.writeHead(404);
+    res.end(JSON.stringify({ error: 'not found' }));
+  }
 });
 
-app.get('/state', (req, res) => res.json(alertState));
-
-app.get('/scan', async (req, res) => {
-  // Trigger manual scan (útil para debug)
-  res.json({ triggered: true });
-  scanCycle();
-});
-
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`[server] Escuchando en puerto ${PORT}`);
 });
 
