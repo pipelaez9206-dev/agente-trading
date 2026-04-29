@@ -347,17 +347,46 @@ function hasLargeGap(bars, thresholdPct = 5) {
 
 let cachedRegime = null;
 let regimeCacheTime = 0;
-const REGIME_CACHE_MS = 5 * 60 * 1000; // 5 min cache
+const REGIME_CACHE_MS = 5 * 60 * 1000;       // 5 min cache si éxito
+const REGIME_RETRY_MS = 60 * 1000;           // 1 min cache si falla (reintento rápido)
+
+// Fetch SPY con logs detallados para diagnosticar
+async function fetchSPYDirect() {
+  const to = formatDate(new Date());
+  const from = formatDate(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
+  const url = `https://api.polygon.io/v2/aggs/ticker/SPY/range/1/hour/${from}/${to}?adjusted=true&sort=asc&limit=400&apiKey=${POLYGON_KEY}`;
+  const data = await fetchJSON(url);
+  if (!data) {
+    console.error('[regime] Polygon devolvió null');
+    return null;
+  }
+  if (data.status && data.status !== 'OK' && data.status !== 'DELAYED') {
+    console.error(`[regime] Polygon status=${data.status} error=${data.error || data.message || 'unknown'}`);
+    return null;
+  }
+  if (!data.results) {
+    console.error(`[regime] Polygon sin .results. Keys=${Object.keys(data).join(',')}`);
+    return null;
+  }
+  if (data.results.length < 50) {
+    console.error(`[regime] SPY solo ${data.results.length} barras (necesito >=50)`);
+    return null;
+  }
+  return data.results.map(b => ({ o: b.o, h: b.h, l: b.l, c: b.c, v: b.v, t: b.t }));
+}
 
 async function getMarketRegime() {
-  // Cache simple para no llamar SPY en cada ticker
-  if (cachedRegime && (Date.now() - regimeCacheTime) < REGIME_CACHE_MS) {
+  // Cache: 5 min si válido, 1 min si falló (para reintentar pronto sin spamear)
+  const ttl = (cachedRegime && cachedRegime.state !== 'UNKNOWN')
+    ? REGIME_CACHE_MS : REGIME_RETRY_MS;
+  if (cachedRegime && (Date.now() - regimeCacheTime) < ttl) {
     return cachedRegime;
   }
   try {
-    const spy = await fetchHourlyBars('SPY');
-    if (!spy || spy.length < 50) {
+    const spy = await fetchSPYDirect();
+    if (!spy) {
       cachedRegime = { state: 'UNKNOWN', spyPrice: 0, spyMA20: 0 };
+      regimeCacheTime = Date.now();
       return cachedRegime;
     }
     const closes = spy.map(b => b.c);
@@ -376,8 +405,10 @@ async function getMarketRegime() {
     regimeCacheTime = Date.now();
     return cachedRegime;
   } catch (e) {
-    console.error('[regime] Error:', e.message);
-    return { state: 'UNKNOWN', spyPrice: 0, spyMA20: 0 };
+    console.error('[regime] Excepción:', e.message);
+    cachedRegime = { state: 'UNKNOWN', spyPrice: 0, spyMA20: 0 };
+    regimeCacheTime = Date.now();
+    return cachedRegime;
   }
 }
 
@@ -427,8 +458,8 @@ function analyzeMomentum(hourlyBars, dailyBars, ticker, regime) {
   let bullPoints = 0;
   const bullChecks = {};
 
-  // 1. Régimen mercado favorable (1 pt)
-  bullChecks.regimeOK = (regime.state === 'BULL' || regime.state === 'NEUTRAL');
+  // 1. Régimen mercado favorable (1 pt) — UNKNOWN se trata como NEUTRAL para no penalizar
+  bullChecks.regimeOK = (regime.state === 'BULL' || regime.state === 'NEUTRAL' || regime.state === 'UNKNOWN');
   if (bullChecks.regimeOK) bullPoints++;
 
   // 2. Tendencia previa: DOWN o SIDEWAYS (1 pt) - permite reversiones y continuaciones
@@ -471,7 +502,7 @@ function analyzeMomentum(hourlyBars, dailyBars, ticker, regime) {
   let bearPoints = 0;
   const bearChecks = {};
 
-  bearChecks.regimeOK = (regime.state === 'BEAR' || regime.state === 'NEUTRAL');
+  bearChecks.regimeOK = (regime.state === 'BEAR' || regime.state === 'NEUTRAL' || regime.state === 'UNKNOWN');
   if (bearChecks.regimeOK) bearPoints++;
 
   bearChecks.priorContext = (trend === 'UP' || trend === 'SIDEWAYS');
@@ -864,7 +895,7 @@ server.listen(PORT, () => {
 // ============================================================
 
 async function startup() {
-  console.log('=== MOMENTUM RADAR v2 ===');
+  console.log('=== MOMENTUM RADAR v2.1 ===');
   console.log(`Universo curado: ${Object.values(CURATED_UNIVERSE).flat().length} tickers`);
   console.log(`Sectores: ${Object.keys(CURATED_UNIVERSE).join(', ')}`);
   console.log(`Intervalo: ${SCAN_INTERVAL_MIN} min`);
