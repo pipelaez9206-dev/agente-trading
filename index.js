@@ -1,20 +1,37 @@
 // ════════════════════════════════════════════
 //  AGENTE TRADING — Node.js para Railway
-//  Datos en TIEMPO REAL via Polygon WebSocket
+//  Datos en TIEMPO REAL via Massive WebSocket
 //  Múltiples timeframes: 1D + 1H + señal
 //  Stop dinámico ATR · Horario óptimo
 // ════════════════════════════════════════════
+//
+//  CAMBIOS v2:
+//  - API key leída desde Railway env var (POLYGON_API_KEY)
+//  - Endpoint actualizado a api.massive.com (ex Polygon)
+//  - WebSocket apunta a socket.massive.com
+//
+//  Variables de entorno requeridas en Railway:
+//    POLYGON_API_KEY   → tu API key de Massive.com
+//    TG_TOKEN          → (opcional, ya hardcoded)
+//    TG_GROUP          → (opcional, ya hardcoded)
+// ════════════════════════════════════════════
+
 const fetch     = require('node-fetch');
 const WebSocket = require('ws');
 
 // ── CONFIG ──────────────────────────────────
-const POLY       = 'uFofGpATkTeoMKxESD4EDlHU3reG_TzX';
-const TG_TOKEN   = '8576001297:AAH6dLApI099m7dUqe8zDaeMtK5pxbXc2t8';
-const TG_GROUP   = '-1003987823131';  // Grupo Bot trading
-const TG_FELIPE  = '6773568382';
+const POLY       = process.env.POLYGON_API_KEY || process.env.MASSIVE_API_KEY;
+const TG_TOKEN   = process.env.TG_TOKEN || '8576001297:AAH6dLApI099m7dUqe8zDaeMtK5pxbXc2t8';
+const TG_GROUP   = process.env.TG_GROUP || '-1003987823131';
+const TG_FELIPE  = process.env.TG_FELIPE || '6773568382';
 const INTERVAL   = 5;
 const MIN_SCORE  = 55;
 const BLOCK_HOURS= 8;
+
+if (!POLY) {
+  console.error('⚠️  Falta POLYGON_API_KEY en Railway. Agrégala en Variables.');
+  process.exit(1);
+}
 
 // ── WATCHLIST ───────────────────────────────
 const WATCHLIST = [
@@ -81,10 +98,9 @@ let top5Sent      = '';
 let summarySentToday = '';
 let morningMsgSent   = '';
 let lastHourlyMsg    = 0;
-let hullAlerted      = {}; // cooldown alertas Hull16 bajista
+let hullAlerted      = {};
 
-// Precios en tiempo real via WebSocket
-let rtPrices = {}; // {SYM: {price, volume, time}}
+let rtPrices = {};
 
 // ── MATH ─────────────────────────────────────
 const sma = (d,n) => { if(!d||d.length<n) return null; return d.slice(-n).reduce((a,b)=>a+b,0)/n; };
@@ -124,15 +140,15 @@ const atr14 = (bars) => {
   return +(total/14).toFixed(4);
 };
 
-// ── WEBSOCKET POLYGON TIEMPO REAL ────────────
+// ── WEBSOCKET MASSIVE TIEMPO REAL ────────────
 let ws = null;
 let wsConnected = false;
 
 function connectWebSocket() {
   const syms = [...WATCHLIST.map(u=>u.sym), 'SPY'];
-  log('Conectando WebSocket Polygon...');
+  log('Conectando WebSocket Massive...');
 
-  ws = new WebSocket('wss://socket.polygon.io/stocks');
+  ws = new WebSocket('wss://socket.massive.com/stocks');
 
   ws.on('open', () => {
     log('WebSocket conectado — autenticando...');
@@ -143,14 +159,15 @@ function connectWebSocket() {
     try {
       const msgs = JSON.parse(data);
       for(const msg of msgs) {
-        // Auth exitosa — suscribir a trades en tiempo real
         if(msg.ev==='status' && msg.status==='auth_success') {
           log('WebSocket autenticado ✅ — suscribiendo a trades...');
           const subs = syms.map(s=>`T.${s}`).join(',');
           ws.send(JSON.stringify({action:'subscribe', params:subs}));
           wsConnected = true;
         }
-        // Trade en tiempo real
+        if(msg.ev==='status' && msg.status==='auth_failed') {
+          log(`❌ WebSocket auth_failed: ${msg.message || 'Unknown'}`);
+        }
         if(msg.ev==='T') {
           rtPrices[msg.sym] = {
             price:  +msg.p.toFixed(4),
@@ -188,11 +205,14 @@ async function fetchBars(sym, timespan='hour', days=30) {
   const fmt  = d => d.toISOString().split('T')[0];
 
   try {
-    const url = `https://api.polygon.io/v2/aggs/ticker/${sym}/range/1/${timespan}/${fmt(from)}/${fmt(to)}?adjusted=true&sort=asc&limit=500&apiKey=${POLY}`;
+    const url = `https://api.massive.com/v2/aggs/ticker/${sym}/range/1/${timespan}/${fmt(from)}/${fmt(to)}?adjusted=true&sort=asc&limit=500&apiKey=${POLY}`;
     const r = await fetchT(url, 7000);
     const d = await r.json();
     if(d?.results?.length>=20) {
       return d.results.map(b=>({c:+b.c.toFixed(4), h:+b.h.toFixed(4), l:+b.l.toFixed(4), v:b.v||0}));
+    }
+    if(d?.status==='ERROR') {
+      log(`Massive error ${sym}: ${d.error||d.message||'?'}`);
     }
   } catch(e) {}
 
@@ -221,26 +241,21 @@ async function fetchBars(sym, timespan='hour', days=30) {
 function getRTPrice(sym) {
   const rt = rtPrices[sym];
   if(!rt) return null;
-  // Solo usar precio RT si es reciente (menos de 2 minutos)
   if(Date.now() - rt.time > 120000) return null;
   return rt.price;
 }
 
 // ── ANÁLISIS MULTI-TIMEFRAME ──────────────────
 async function analyzeMultiTF(sym) {
-  // 1. Barras 1H para Hull16 + EMA9 (tendencia principal)
   const bars1H = await fetchBars(sym, 'hour', 30);
   if(!bars1H||bars1H.length<40) return null;
 
-  // 2. Precio en tiempo real (si disponible) o último close 1H
   const rtPrice = getRTPrice(sym);
   const closes1H = bars1H.map(b=>b.c);
   const price    = rtPrice || closes1H[closes1H.length-1];
 
-  // Si tenemos precio RT, agregar al array de closes
   const closesWithRT = rtPrice ? [...closes1H.slice(0,-1), rtPrice] : closes1H;
 
-  // ── Indicadores 1H ──
   const h16    = hma16(closesWithRT);
   const h16p   = hma16(closesWithRT.slice(0,-1));
   const h16pp  = hma16(closesWithRT.slice(0,-2));
@@ -253,11 +268,9 @@ async function analyzeMultiTF(sym) {
   const atrV   = atr14(bars1H);
   if(!h16||!ma20) return null;
 
-  // Hull16 dirección y flip
   const hullUp   = h16p ? h16>h16p : true;
   const hullFlip = h16&&h16p&&h16pp ? ((h16>h16p)!==(h16p>h16pp)) : false;
 
-  // Hull Lock
   if(!hullLock[sym]) {
     hullLock[sym] = {dir:hullUp?'UP':'DOWN', flipTime:Date.now(), bars:0};
   } else if(hullFlip) {
@@ -267,31 +280,27 @@ async function analyzeMultiTF(sym) {
   const hl = hullLock[sym];
   hl.bars = Math.floor((Date.now()-hl.flipTime)/(60*60*1000));
 
-  // EMA9 giro
   const ema9TurnUp  = !!(ma9&&ma9p&&ma9p2 && ma9>ma9p && ma9p<=ma9p2);
   const ema9Trending= !!(ma9&&ma9p && ma9>ma9p);
 
-  // Volumen — usar datos históricos de barras (no WebSocket)
   const volumes   = bars1H.map(b=>b.v).filter(v=>v>0);
   const volCurrent= volumes.length>0 ? volumes[volumes.length-1] : 0;
   const volAvg20  = volumes.length>=5 ? volumes.slice(-21,-1).reduce((a,b)=>a+b,0)/Math.min(20,volumes.slice(-21,-1).length) : 1;
   const volRatio  = volAvg20>0 ? +(volCurrent/volAvg20).toFixed(2) : 1;
   const highVolume= volRatio >= 1.2;
 
-  // 3. Barras 15M — momentum de entrada
-  const bars15M = await fetchBars(sym, 'minute', 5); // últimos 5 días en 15M via Polygon aggs
+  const bars15M = await fetchBars(sym, 'minute', 5);
   let trend15M   = 'NEUTRAL';
   let ema9_15M   = null;
   let rsi15M     = null;
   let vol15M_ratio = 0;
   let price15M   = null;
 
-  // Fetch 15M separado
   try {
     const to15   = new Date();
     const from15 = new Date(to15 - 5*864e5);
     const fmt    = d => d.toISOString().split('T')[0];
-    const url15  = `https://api.polygon.io/v2/aggs/ticker/${sym}/range/15/minute/${fmt(from15)}/${fmt(to15)}?adjusted=true&sort=asc&limit=300&apiKey=${POLY}`;
+    const url15  = `https://api.massive.com/v2/aggs/ticker/${sym}/range/15/minute/${fmt(from15)}/${fmt(to15)}?adjusted=true&sort=asc&limit=300&apiKey=${POLY}`;
     const r15    = await fetchT(url15, 7000);
     const d15    = await r15.json();
     if(d15?.results?.length>=20) {
@@ -305,10 +314,8 @@ async function analyzeMultiTF(sym) {
       rsi15M    = rsi14(cl15);
       price15M  = getRTPrice(sym) || cl15[cl15.length-1];
 
-      // Tendencia 15M
       if(h16_15&&h16_15p) trend15M = h16_15>h16_15p ? 'UP' : 'DOWN';
 
-      // Volumen 15M
       const vol15Cur = vl15[vl15.length-1];
       const vol15Avg = vl15.slice(-21,-1).reduce((a,b)=>a+b,0)/20||1;
       vol15M_ratio   = +(vol15Cur/vol15Avg).toFixed(2);
@@ -317,7 +324,6 @@ async function analyzeMultiTF(sym) {
     }
   } catch(e) { log(`${sym} 15M error: ${e.message}`); }
 
-  // 4. Tendencia diaria (filtro mayor)
   const bars1D = await fetchBars(sym, 'day', 60);
   let trendDaily = 'NEUTRAL';
   if(bars1D&&bars1D.length>=20) {
@@ -327,30 +333,24 @@ async function analyzeMultiTF(sym) {
     if(h16D&&h16Dp) trendDaily = h16D>h16Dp ? 'UP' : 'DOWN';
   }
 
-  // Score multi-timeframe — bonificadores, NO requisitos
   let pts=0, max=0;
   const add = (ok,w) => {max+=w; if(ok) pts+=w;};
-  // ── 1H (base — más peso) ──
-  add(hullUp,          5);  // Hull16 1H alcista
-  add(ema9TurnUp,      6);  // EMA9 giró alcista en 1H — señal fuerte
-  add(ema9Trending,    3);  // EMA9 subiendo en 1H
-  add(!!(rsiV&&rsiV>=30&&rsiV<=75), 3); // RSI 1H sano
-  add(price>(h16||price), 2); // precio sobre Hull16
-  add(highVolume,      3);  // volumen 1H alto
-  // ── 15M (confirmador) ──
-  add(trend15M==='UP',  4); // Hull16 15M alcista
-  add(!!(rsi15M&&rsi15M>=25&&rsi15M<=75), 2); // RSI 15M sano
-  add(vol15M_ratio>=1.2, 2); // volumen 15M alto
-  // ── Diario (bonificador) ──
-  add(trendDaily==='UP', 3); // tendencia diaria alcista — bonus no requisito
-  add(!!(ma20&&ma40&&ma20>ma40), 2); // MA20>MA40
+  add(hullUp,          5);
+  add(ema9TurnUp,      6);
+  add(ema9Trending,    3);
+  add(!!(rsiV&&rsiV>=30&&rsiV<=75), 3);
+  add(price>(h16||price), 2);
+  add(highVolume,      3);
+  add(trend15M==='UP',  4);
+  add(!!(rsi15M&&rsi15M>=25&&rsi15M<=75), 2);
+  add(vol15M_ratio>=1.2, 2);
+  add(trendDaily==='UP', 3);
+  add(!!(ma20&&ma40&&ma20>ma40), 2);
   const score = max>0 ? Math.round(pts/max*100) : 50;
 
-  // Stop dinámico basado en ATR
   const atrStop = atrV ? +(price - atrV*1.5).toFixed(2) : +(price*0.985).toFixed(2);
-  const sl      = Math.max(atrStop, +(price*0.97).toFixed(2)); // mínimo 3% stop
+  const sl      = Math.max(atrStop, +(price*0.97).toFixed(2));
 
-  // Condiciones BUY
   const session    = getMarketSession();
   const isExtended = session==='PREMARKET'||session==='POSTMARKET';
   const minScore   = isExtended ? 75 : MIN_SCORE;
@@ -358,18 +358,15 @@ async function analyzeMultiTF(sym) {
   const rsiMin     = 30;
   const rsiMax     = isExtended ? 65 : 72;
 
-  // Horario óptimo: 9:30-11am y 2:30-4pm ET
   const et    = getET();
   const etMin = et.getHours()*60+et.getMinutes();
   const horaOptima = (etMin>=570&&etMin<=660)||(etMin>=870&&etMin<=960);
 
-  // Señal FLIP — Hull16 gira alcista
   const isBuyFlip = hullFlip && hullUp
     && (ema9TurnUp||ema9Trending)
     && score >= 55
     && (rsiV===null||(rsiV>=rsiMin&&rsiV<=rsiMax));
 
-  // Señal CONTINUACIÓN — precio sigue Hull alcista
   const HIGH_VOL = ['TSLA','AMD','PLTR','SOXL','MARA','HOOD','SOFI','RIVN','ORCL','COIN'];
   const isBuyCont = !hullFlip && hullUp
     && hl.bars >= 1
@@ -378,7 +375,6 @@ async function analyzeMultiTF(sym) {
     && score >= 58
     && (rsiV===null||(rsiV>=rsiMin&&rsiV<=75));
 
-  // En extended hours solo activos de alto volumen
   const isHighVol = HIGH_VOL.includes(sym);
   const canTrade  = !isExtended || isHighVol;
 
@@ -507,7 +503,6 @@ async function sendSignal(sig) {
 async function checkExits() {
   const openSyms = Object.keys(openTrades);
   if(!openSyms.length) return;
-  // Fuera de horario extendido no monitorear salidas
   const session = getMarketSession();
   if(session==='CLOSED'||session==='WEEKEND') return;
   log(`👀 Monitoreando: ${openSyms.join(', ')}`);
@@ -515,7 +510,6 @@ async function checkExits() {
   for(const sym of openSyms) {
     const trade = openTrades[sym];
     try {
-      // Usar precio RT si disponible
       const rtP   = getRTPrice(sym);
       let price   = rtP;
       if(!price) {
@@ -529,10 +523,9 @@ async function checkExits() {
 
       log(`📊 ${sym}: $${price.toFixed(2)} · P&L ${pnl>=0?'+':''}${pnl}% · Stop $${trade.sl}${rtP?' ⚡':''}`);
 
-      // TARGET +2%
       if(price >= trade.t1 && !trade.t1Hit) {
         trade.t1Hit = true;
-        trade.sl    = trade.entry; // mover stop a break-even
+        trade.sl    = trade.entry;
         trade.result= 'WIN+2';
         trade.exit  = +price.toFixed(2);
         trade.pnl   = pnl;
@@ -553,7 +546,6 @@ async function checkExits() {
         );
       }
 
-      // TARGET +3%
       if(price >= trade.t2) {
         const pnl2 = +(((price-trade.entry)/trade.entry)*100).toFixed(2);
         trade.result= 'WIN+3';
@@ -575,7 +567,6 @@ async function checkExits() {
         continue;
       }
 
-      // STOP LOSS
       if(price <= trade.sl) {
         const perdPct = +(((price-trade.entry)/trade.entry)*100).toFixed(2);
         trade.result= 'LOSS';
@@ -596,7 +587,6 @@ async function checkExits() {
         continue;
       }
 
-      // Hull16 gira bajista — solo alertar 1 vez por hora por activo
       const bars1H = await fetchBars(sym, 'hour', 10);
       if(bars1H&&bars1H.length>=20 && trade.bars>=2) {
         const cl  = bars1H.map(b=>b.c);
@@ -858,7 +848,6 @@ function scheduleDailySummary() {
   const hour  = et.getHours();
   const min   = et.getMinutes();
 
-  // Reset Hull Lock bars diario al abrir mercado
   if(hour===9&&min===30) {
     Object.keys(hullLock).forEach(sym => {
       if(hullLock[sym].bars > 12) {
@@ -869,7 +858,6 @@ function scheduleDailySummary() {
     log('🔄 Hull Lock reseteado para el nuevo día');
   }
 
-  // Buenos días 9:25am ET
   if(hour===9&&min>=25&&min<=35&&morningMsgSent!==today) {
     morningMsgSent = today;
     const fecha = et.toLocaleDateString('es-CO',{weekday:'long',day:'numeric',month:'long'});
@@ -886,7 +874,6 @@ function scheduleDailySummary() {
     );
   }
 
-  // Resumen 4pm ET
   if(hour===16&&min<=10&&summarySentToday!==today) {
     summarySentToday = today;
     sendDailySummary();
@@ -899,20 +886,19 @@ function scheduleDailySummary() {
 async function main() {
   log('🚀 Agente Trading PRO iniciando...');
   log(`📊 Watchlist: ${WATCHLIST.length} activos`);
-  log(`⚡ Datos: Polygon WebSocket tiempo real`);
+  log(`⚡ Datos: Massive WebSocket tiempo real`);
   log(`📊 Multi-timeframe: 1D + 1H`);
   log(`🎯 Score mínimo: ${MIN_SCORE}%`);
   log(`🛑 Stop: ATR dinámico`);
+  log(`🔑 API key configurada: ${POLY ? POLY.slice(0,4)+'...'+POLY.slice(-4) : 'FALTA'}`);
 
-  // Conectar WebSocket para datos en tiempo real
   connectWebSocket();
 
-  // Mensaje de inicio
   await sendTG(TG_GROUP,
     `🤖 Agente Trading PRO iniciado\n`
     +`━━━━━━━━━━━━━━━━━━━━\n`
     +`✅ Corriendo en la nube 24/7\n`
-    +`⚡ Polygon WebSocket tiempo real\n`
+    +`⚡ Massive WebSocket tiempo real\n`
     +`📊 Analisis multi-timeframe 1D + 1H\n`
     +`🛑 Stop dinamico por ATR\n`
     +`📊 ${WATCHLIST.length} activos monitoreados\n`
