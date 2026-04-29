@@ -118,7 +118,7 @@ function getSector(ticker) {
 }
 
 // ============================================================
-// FETCH HELPERS — Polygon API
+// FETCH HELPERS — Massive.com API
 // ============================================================
 
 function fetchJSON(url, timeoutMs = 15000) {
@@ -142,7 +142,7 @@ function fetchJSON(url, timeoutMs = 15000) {
 async function fetchHourlyBars(ticker) {
   const to = formatDate(new Date());
   const from = formatDate(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
-  const url = `https://api.polygon.io/v2/aggs/ticker/${ticker}/range/1/hour/${from}/${to}?adjusted=true&sort=asc&limit=400&apiKey=${POLYGON_KEY}`;
+  const url = `https://api.massive.com/v2/aggs/ticker/${ticker}/range/1/hour/${from}/${to}?adjusted=true&sort=asc&limit=400&apiKey=${POLYGON_KEY}`;
   const data = await fetchJSON(url);
   if (!data.results || data.results.length < 50) return null;
   return data.results.map(b => ({ o: b.o, h: b.h, l: b.l, c: b.c, v: b.v, t: b.t }));
@@ -151,7 +151,7 @@ async function fetchHourlyBars(ticker) {
 async function fetchDailyBars(ticker) {
   const to = formatDate(new Date());
   const from = formatDate(new Date(Date.now() - 365 * 24 * 60 * 60 * 1000));
-  const url = `https://api.polygon.io/v2/aggs/ticker/${ticker}/range/1/day/${from}/${to}?adjusted=true&sort=asc&limit=300&apiKey=${POLYGON_KEY}`;
+  const url = `https://api.massive.com/v2/aggs/ticker/${ticker}/range/1/day/${from}/${to}?adjusted=true&sort=asc&limit=300&apiKey=${POLYGON_KEY}`;
   const data = await fetchJSON(url);
   if (!data.results || data.results.length < 50) return null;
   return data.results.map(b => ({ o: b.o, h: b.h, l: b.l, c: b.c, v: b.v, t: b.t }));
@@ -161,8 +161,8 @@ async function fetchTopMovers() {
   const tickers = new Set();
   try {
     const [gainers, losers] = await Promise.all([
-      fetchJSON(`https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/gainers?apiKey=${POLYGON_KEY}`),
-      fetchJSON(`https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/losers?apiKey=${POLYGON_KEY}`)
+      fetchJSON(`https://api.massive.com/v2/snapshot/locale/us/markets/stocks/gainers?apiKey=${POLYGON_KEY}`),
+      fetchJSON(`https://api.massive.com/v2/snapshot/locale/us/markets/stocks/losers?apiKey=${POLYGON_KEY}`)
     ]);
     const filterMover = (t) => {
       const price = t.day?.c || t.lastTrade?.p || 0;
@@ -354,18 +354,18 @@ const REGIME_RETRY_MS = 60 * 1000;           // 1 min cache si falla (reintento 
 async function fetchSPYDirect() {
   const to = formatDate(new Date());
   const from = formatDate(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
-  const url = `https://api.polygon.io/v2/aggs/ticker/SPY/range/1/hour/${from}/${to}?adjusted=true&sort=asc&limit=400&apiKey=${POLYGON_KEY}`;
+  const url = `https://api.massive.com/v2/aggs/ticker/SPY/range/1/hour/${from}/${to}?adjusted=true&sort=asc&limit=400&apiKey=${POLYGON_KEY}`;
   const data = await fetchJSON(url);
   if (!data) {
-    console.error('[regime] Polygon devolvió null');
+    console.error('[regime] Massive devolvió null');
     return null;
   }
   if (data.status && data.status !== 'OK' && data.status !== 'DELAYED') {
-    console.error(`[regime] Polygon status=${data.status} error=${data.error || data.message || 'unknown'}`);
+    console.error(`[regime] Massive status=${data.status} error=${data.error || data.message || 'unknown'}`);
     return null;
   }
   if (!data.results) {
-    console.error(`[regime] Polygon sin .results. Keys=${Object.keys(data).join(',')}`);
+    console.error(`[regime] Massive sin .results. Keys=${Object.keys(data).join(',')}`);
     return null;
   }
   if (data.results.length < 50) {
@@ -895,7 +895,7 @@ server.listen(PORT, () => {
 // ============================================================
 
 async function startup() {
-  console.log('=== MOMENTUM RADAR v2.1 ===');
+  console.log('=== MOMENTUM RADAR v2.2 (Massive.com) ===');
   console.log(`Universo curado: ${Object.values(CURATED_UNIVERSE).flat().length} tickers`);
   console.log(`Sectores: ${Object.keys(CURATED_UNIVERSE).join(', ')}`);
   console.log(`Intervalo: ${SCAN_INTERVAL_MIN} min`);
