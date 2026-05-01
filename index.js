@@ -25,7 +25,7 @@ const TG_TOKEN   = process.env.TG_TOKEN || '8576001297:AAH6dLApI099m7dUqe8zDaeMt
 const TG_GROUP   = process.env.TG_GROUP || '-1003987823131';
 const TG_FELIPE  = process.env.TG_FELIPE || '6773568382';
 const INTERVAL   = 5;
-const MIN_SCORE  = 55;
+const MIN_SCORE  = 65;
 const BLOCK_HOURS= 8;
 
 if (!POLY) {
@@ -353,7 +353,7 @@ async function analyzeMultiTF(sym) {
 
   const session    = getMarketSession();
   const isExtended = session==='PREMARKET'||session==='POSTMARKET';
-  const minScore   = isExtended ? 75 : MIN_SCORE;
+  const minScore   = isExtended ? 80 : MIN_SCORE;
   const minBars    = isExtended ? 2  : 0;
   const rsiMin     = 30;
   const rsiMax     = isExtended ? 65 : 72;
@@ -364,7 +364,7 @@ async function analyzeMultiTF(sym) {
 
   const isBuyFlip = hullFlip && hullUp
     && (ema9TurnUp||ema9Trending)
-    && score >= 55
+    && score >= 65
     && (rsiV===null||(rsiV>=rsiMin&&rsiV<=rsiMax));
 
   const HIGH_VOL = ['TSLA','AMD','PLTR','SOXL','MARA','HOOD','SOFI','RIVN','ORCL','COIN'];
@@ -372,7 +372,7 @@ async function analyzeMultiTF(sym) {
     && hl.bars >= 1
     && ema9Trending
     && price > (h16||price)
-    && score >= 58
+    && score >= 68
     && (rsiV===null||(rsiV>=rsiMin&&rsiV<=75));
 
   const isHighVol = HIGH_VOL.includes(sym);
