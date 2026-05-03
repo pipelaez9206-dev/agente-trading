@@ -139,22 +139,102 @@ function fetchJSON(url, timeoutMs = 15000) {
   });
 }
 
+// Helper: fetch genérico con timeout (para Yahoo, sin apiKey)
+function fetchPlainJSON(url, timeoutMs = 8000) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => (data += chunk));
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); }
+        catch (e) { reject(new Error('Invalid JSON')); }
+      });
+    });
+    req.on('error', reject);
+    req.setTimeout(timeoutMs, () => { req.destroy(); reject(new Error('Timeout')); });
+  });
+}
+
 async function fetchHourlyBars(ticker) {
   const to = formatDate(new Date());
   const from = formatDate(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
-  const url = `https://api.massive.com/v2/aggs/ticker/${ticker}/range/1/hour/${from}/${to}?adjusted=true&sort=asc&limit=400&apiKey=${POLYGON_KEY}`;
-  const data = await fetchJSON(url);
-  if (!data.results || data.results.length < 50) return null;
-  return data.results.map(b => ({ o: b.o, h: b.h, l: b.l, c: b.c, v: b.v, t: b.t }));
+
+  // Intento 1: Massive
+  try {
+    const url = `https://api.massive.com/v2/aggs/ticker/${ticker}/range/1/hour/${from}/${to}?adjusted=true&sort=asc&limit=400&apiKey=${POLYGON_KEY}`;
+    const data = await fetchJSON(url);
+    if (data?.results && data.results.length >= 50) {
+      return data.results.map(b => ({ o: b.o, h: b.h, l: b.l, c: b.c, v: b.v, t: b.t }));
+    }
+  } catch (e) {}
+
+  // Intento 2: Yahoo Finance fallback (1h, 1 mes)
+  try {
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1h&range=1mo`;
+    const data = await fetchPlainJSON(url, 8000);
+    const result = data?.chart?.result?.[0];
+    const q = result?.indicators?.quote?.[0];
+    const ts = result?.timestamp;
+    if (q?.close && ts && ts.length >= 50) {
+      const bars = [];
+      for (let i = 0; i < ts.length; i++) {
+        if (q.close[i] != null && q.close[i] > 0) {
+          bars.push({
+            o: +q.open?.[i] || q.close[i],
+            h: +q.high?.[i] || q.close[i],
+            l: +q.low?.[i] || q.close[i],
+            c: +q.close[i],
+            v: q.volume?.[i] || 0,
+            t: ts[i] * 1000
+          });
+        }
+      }
+      if (bars.length >= 50) return bars;
+    }
+  } catch (e) {}
+
+  return null;
 }
 
 async function fetchDailyBars(ticker) {
   const to = formatDate(new Date());
   const from = formatDate(new Date(Date.now() - 365 * 24 * 60 * 60 * 1000));
-  const url = `https://api.massive.com/v2/aggs/ticker/${ticker}/range/1/day/${from}/${to}?adjusted=true&sort=asc&limit=300&apiKey=${POLYGON_KEY}`;
-  const data = await fetchJSON(url);
-  if (!data.results || data.results.length < 50) return null;
-  return data.results.map(b => ({ o: b.o, h: b.h, l: b.l, c: b.c, v: b.v, t: b.t }));
+
+  // Intento 1: Massive
+  try {
+    const url = `https://api.massive.com/v2/aggs/ticker/${ticker}/range/1/day/${from}/${to}?adjusted=true&sort=asc&limit=300&apiKey=${POLYGON_KEY}`;
+    const data = await fetchJSON(url);
+    if (data?.results && data.results.length >= 50) {
+      return data.results.map(b => ({ o: b.o, h: b.h, l: b.l, c: b.c, v: b.v, t: b.t }));
+    }
+  } catch (e) {}
+
+  // Intento 2: Yahoo Finance fallback (1d, 1 año)
+  try {
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1y`;
+    const data = await fetchPlainJSON(url, 8000);
+    const result = data?.chart?.result?.[0];
+    const q = result?.indicators?.quote?.[0];
+    const ts = result?.timestamp;
+    if (q?.close && ts && ts.length >= 50) {
+      const bars = [];
+      for (let i = 0; i < ts.length; i++) {
+        if (q.close[i] != null && q.close[i] > 0) {
+          bars.push({
+            o: +q.open?.[i] || q.close[i],
+            h: +q.high?.[i] || q.close[i],
+            l: +q.low?.[i] || q.close[i],
+            c: +q.close[i],
+            v: q.volume?.[i] || 0,
+            t: ts[i] * 1000
+          });
+        }
+      }
+      if (bars.length >= 50) return bars;
+    }
+  } catch (e) {}
+
+  return null;
 }
 
 async function fetchTopMovers() {
@@ -350,29 +430,14 @@ let regimeCacheTime = 0;
 const REGIME_CACHE_MS = 5 * 60 * 1000;       // 5 min cache si éxito
 const REGIME_RETRY_MS = 60 * 1000;           // 1 min cache si falla (reintento rápido)
 
-// Fetch SPY con logs detallados para diagnosticar
+// Fetch SPY usando fetchHourlyBars (ya incluye fallback Yahoo)
 async function fetchSPYDirect() {
-  const to = formatDate(new Date());
-  const from = formatDate(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
-  const url = `https://api.massive.com/v2/aggs/ticker/SPY/range/1/hour/${from}/${to}?adjusted=true&sort=asc&limit=400&apiKey=${POLYGON_KEY}`;
-  const data = await fetchJSON(url);
-  if (!data) {
-    console.error('[regime] Massive devolvió null');
+  const bars = await fetchHourlyBars('SPY');
+  if (!bars || bars.length < 50) {
+    console.error(`[regime] SPY no disponible (Massive falló y Yahoo también)`);
     return null;
   }
-  if (data.status && data.status !== 'OK' && data.status !== 'DELAYED') {
-    console.error(`[regime] Massive status=${data.status} error=${data.error || data.message || 'unknown'}`);
-    return null;
-  }
-  if (!data.results) {
-    console.error(`[regime] Massive sin .results. Keys=${Object.keys(data).join(',')}`);
-    return null;
-  }
-  if (data.results.length < 50) {
-    console.error(`[regime] SPY solo ${data.results.length} barras (necesito >=50)`);
-    return null;
-  }
-  return data.results.map(b => ({ o: b.o, h: b.h, l: b.l, c: b.c, v: b.v, t: b.t }));
+  return bars;
 }
 
 async function getMarketRegime() {
@@ -895,7 +960,7 @@ server.listen(PORT, () => {
 // ============================================================
 
 async function startup() {
-  console.log('=== MOMENTUM RADAR v2.2 (Massive.com) ===');
+  console.log('=== MOMENTUM RADAR v2.3 (Massive + Yahoo fallback) ===');
   console.log(`Universo curado: ${Object.values(CURATED_UNIVERSE).flat().length} tickers`);
   console.log(`Sectores: ${Object.keys(CURATED_UNIVERSE).join(', ')}`);
   console.log(`Intervalo: ${SCAN_INTERVAL_MIN} min`);
